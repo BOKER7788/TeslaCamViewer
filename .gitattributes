@@ -1,0 +1,40 @@
+# ============================================================
+#  Tesla 行车记录仪查看器 — 行尾符与文本属性声明
+# ============================================================
+# 目的：让仓库内的行尾符与平台无关，避免在 macOS / Linux 上
+#       clone 后 Shell 脚本因 CRLF 报 "bad interpreter"，
+#       同时保证 Windows 批处理脚本以 CRLF 检出。
+
+# ---------- 默认：自动识别文本文件，统一以 LF 入库 ----------
+* text=auto eol=lf
+
+# ---------- 源文件：统一 LF ----------
+*.html   text eol=lf
+*.css    text eol=lf
+*.js     text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+*.txt    text eol=lf
+.gitignore   text eol=lf
+.gitattributes text eol=lf
+
+# ---------- 平台脚本：按目标平台区分 ----------
+# Unix Shell 脚本必须为 LF，否则无法执行
+*.sh     text eol=lf
+# Windows 批处理建议 CRLF，兼容 cmd.exe 的标签与多行语法
+*.bat    text eol=crlf
+*.cmd    text eol=crlf
+
+# ---------- 二进制文件：禁止任何行尾转换 ----------
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.mp4    binary
+*.mkv    binary
+*.webm   binary
+*.zip    binary
+
+# ---------- 语言统计：让 GitHub 正确识别单文件应用 ----------
+*.html   linguist-detectable=true
