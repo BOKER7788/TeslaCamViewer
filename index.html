@@ -1,0 +1,2716 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tesla 行车记录仪查看器</title>
+<style>
+  /* ============================================================
+     基础重置 + 字体
+     ============================================================ */
+  *, *::before, *::after { box-sizing: border-box; }
+  html {
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    margin: 0; padding: 0;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑", sans-serif;
+    background: #0b0d10;
+    color: #e6e8eb;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  button { font-family: inherit; cursor: pointer; }
+  input, select { font-family: inherit; }
+
+  /* ============================================================
+     顶部标题栏
+     ============================================================ */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 20px;
+    background: linear-gradient(180deg, #16191d 0%, #0f1216 100%);
+    border-bottom: 1px solid #232830;
+    min-height: 60px;
+    flex: 0 0 auto;
+  }
+  .topbar .brand {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 18px; font-weight: 600; color: #e6e8eb;
+  }
+  .topbar .brand .logo {
+    width: 32px; height: 32px;
+    background: #e82127; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 800; font-size: 16px;
+    box-shadow: 0 2px 8px rgba(232, 33, 39, 0.4);
+  }
+  .topbar .toolbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .topbar .toolbar .group {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    background: #1a1e24; border: 1px solid #2a2f37; border-radius: 8px;
+  }
+  .topbar .toolbar label {
+    color: #8a93a0; font-size: 12px;
+  }
+  .btn {
+    background: #1f242b; color: #e6e8eb;
+    border: 1px solid #2a2f37; border-radius: 8px;
+    padding: 8px 14px; font-size: 13px;
+    transition: all .15s ease;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover { background: #2a3038; border-color: #3a4150; }
+  .btn.primary {
+    background: #e82127; border-color: #e82127; color: #fff;
+  }
+  .btn.primary:hover { background: #ff2d33; border-color: #ff2d33; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.icon-only { padding: 8px 10px; }
+
+  select {
+    background: #1f242b; color: #e6e8eb;
+    border: 1px solid #2a2f37; border-radius: 6px;
+    padding: 6px 10px; font-size: 13px;
+    outline: none;
+  }
+  select:focus { border-color: #e82127; }
+
+  /* ============================================================
+     主体三栏布局
+     ============================================================ */
+  .app {
+    display: grid;
+    grid-template-columns: 280px 1fr 280px;
+    /* 用 flex 撑满 topbar 之外的剩余高度（替代 calc(100vh - 60px)，
+       避免 100vh 在部分缩放/DPI 场景下的高度偏差把底部控件挤出视口） */
+    grid-template-rows: minmax(0, 1fr);
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+  }
+  @media (max-width: 1100px) {
+    .app { grid-template-columns: 240px 1fr; }
+    .right-panel { display: none; }
+  }
+  @media (max-width: 720px) {
+    .app {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: minmax(0, auto) minmax(0, 1fr);
+    }
+    .left-panel { max-height: 200px; }
+    .right-panel { display: none; }
+  }
+
+  .left-panel, .right-panel {
+    background: #0f1216;
+    border-right: 1px solid #232830;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
+    min-width: 0;
+  }
+  .right-panel { border-right: none; border-left: 1px solid #232830; }
+
+  .panel-header {
+    padding: 14px 16px;
+    font-size: 12px; font-weight: 600;
+    color: #8a93a0; text-transform: uppercase; letter-spacing: 1px;
+    background: #0b0d10;
+    border-bottom: 1px solid #1f242b;
+    position: sticky; top: 0; z-index: 2;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .panel-header .count {
+    background: #1f242b; color: #b6bdc7;
+    padding: 2px 8px; border-radius: 10px;
+    font-size: 11px; letter-spacing: 0;
+  }
+
+  /* ============================================================
+     左侧浏览列表（事件/段）
+     ============================================================ */
+  .date-group {
+    padding: 8px 0 4px;
+    border-bottom: 1px solid #1a1e24;
+  }
+  .date-group .date-header {
+    padding: 8px 16px 6px;
+    font-size: 11px; font-weight: 600;
+    color: #8a93a0; text-transform: uppercase; letter-spacing: .5px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .date-group .date-header .badge {
+    background: #1f242b; color: #b6bdc7;
+    padding: 2px 6px; border-radius: 8px;
+    font-size: 10px;
+  }
+  .event-item {
+    padding: 10px 16px;
+    display: flex; align-items: center; gap: 10px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: background .15s ease;
+  }
+  .event-item:hover { background: #16191d; }
+  .event-item.active {
+    background: #1a1f26;
+    border-left-color: #e82127;
+  }
+  .event-item .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .event-item .dot.saved { background: #e82127; }
+  .event-item .dot.sentry { background: #ff9500; }
+  .event-item .dot.recent { background: #4a90e2; }
+  .event-item .info {
+    flex: 1; min-width: 0;
+  }
+  .event-item .info .title {
+    font-size: 13px; color: #e6e8eb;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .event-item .info .meta {
+    font-size: 11px; color: #8a93a0; margin-top: 2px;
+    display: flex; gap: 8px; align-items: center;
+  }
+  .event-item .info .meta .tag {
+    padding: 1px 6px; border-radius: 4px;
+    background: #1f242b; color: #b6bdc7;
+  }
+  .event-item .info .meta .tag.saved { background: #3d0d10; color: #ff8085; }
+  .event-item .info .meta .tag.sentry { background: #3d2810; color: #ffb84d; }
+  .event-item .info .meta .tag.recent { background: #0e223d; color: #7fb3ff; }
+
+  /* ============================================================
+     中央播放区
+     ============================================================ */
+  .player-area {
+    display: flex; flex-direction: column;
+    background: #000;
+    min-width: 0;
+    min-height: 0;          /* 允许在 grid 行内正确收缩，避免把 controls 挤出 */
+    position: relative;
+    overflow: hidden;
+  }
+  .player-stage {
+    flex: 1 1 0%;           /* basis 0，避免内容撑大 stage 挤压底部控件 */
+    min-height: 0;
+    min-width: 0;
+    background: #000;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .player-stage .empty-state {
+    color: #5a6068; text-align: center;
+    max-width: 480px; padding: 20px;
+  }
+  .player-stage .empty-state .icon {
+    font-size: 64px; margin-bottom: 16px;
+  }
+  .player-stage .empty-state h2 {
+    font-size: 18px; margin: 0 0 12px;
+    color: #8a93a0; font-weight: 600;
+  }
+  .player-stage .empty-state p {
+    font-size: 13px; line-height: 1.6; margin: 6px 0;
+  }
+  .player-stage .empty-state .hint {
+    margin-top: 24px; padding: 12px 16px;
+    background: #16191d; border: 1px solid #232830; border-radius: 8px;
+    font-size: 12px; color: #b6bdc7;
+    text-align: left;
+  }
+
+  /* 视频网格（多路同步） */
+  .video-grid {
+    display: grid; gap: 2px;
+    flex: 1 1 auto;
+    align-self: stretch;    /* 父级 align-items:center 会让它塌缩，这里强制撑满交叉轴 */
+    width: 100%;
+    min-width: 0; min-height: 0;
+    background: #000;
+    padding: 2px;
+    overflow: hidden;
+  }
+  .video-grid.layout-1 { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  .video-grid.layout-2h { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  .video-grid.layout-2v { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+  .video-grid.layout-4 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+  .video-grid.layout-pip {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .video-grid.layout-pip .pip {
+    position: absolute;
+    bottom: 16px; right: 16px;
+    width: 30%; max-width: 320px; aspect-ratio: 16 / 9;
+    border: 2px solid #fff;
+    border-radius: 8px;
+    overflow: hidden;
+    z-index: 5;
+  }
+  .video-cell {
+    position: relative; min-width: 0; min-height: 0;
+    background: #000;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  .video-cell video {
+    width: 100%; height: 100%;
+    object-fit: contain;
+    background: #000;
+  }
+  .video-cell .cam-label {
+    position: absolute; top: 8px; left: 8px;
+    background: rgba(0,0,0,.65);
+    color: #fff;
+    padding: 4px 10px; border-radius: 4px;
+    font-size: 12px; font-weight: 500;
+    pointer-events: none;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .video-cell .cam-label .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #e82127;
+  }
+  .video-cell.missing {
+    background: #0b0d10;
+    color: #3a3f47;
+    font-size: 12px;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .video-cell.missing .icon { font-size: 32px; }
+
+  /* 视频画面上的时间水印（叠加在每个摄像头画面上） */
+  .video-cell .watermark {
+    position: absolute; top: 20px; right: 20px;
+    padding: 5px 11px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", "Microsoft YaHei", monospace;
+    font-size: 14px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .5px;
+    border-radius: 4px;
+    pointer-events: none;
+    z-index: 4;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  }
+
+  /* 播放控件 */
+  .controls {
+    flex-shrink: 0;
+    background: #0b0d10;
+    border-top: 1px solid #232830;
+    padding: 12px 16px;
+    position: relative;
+    z-index: 10;
+  }
+  .controls .row1 {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 8px;
+  }
+  .controls .time-info {
+    font-size: 12px; color: #8a93a0;
+    font-variant-numeric: tabular-nums;
+    min-width: 100px;
+  }
+  .controls .time-info .current {
+    color: #e6e8eb; font-weight: 600;
+  }
+  .controls .time-info .sep {
+    margin: 0 4px;
+  }
+  .controls .seg-info {
+    background: #1f242b; color: #b6bdc7;
+    padding: 4px 10px; border-radius: 6px;
+    font-size: 12px;
+    margin-left: auto;
+  }
+  .controls .progress {
+    flex: 1; min-width: 0;
+    height: 8px;
+    background: linear-gradient(180deg, #1a1e24, #232830);
+    border-radius: 4px;
+    cursor: pointer;
+    position: relative;
+    overflow: visible;
+    transition: height .15s ease;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+  }
+  .controls .progress:hover { height: 10px; }
+  .controls .progress .fill {
+    height: 100%;
+    background: linear-gradient(90deg, #ff5055, #e82127);
+    width: 0%; border-radius: 4px;
+    transition: width .04s linear;
+    pointer-events: none;
+    box-shadow: 0 0 10px rgba(232,33,39,.55);
+  }
+  .controls .progress .handle {
+    position: absolute; top: 50%;
+    width: 14px; height: 14px;
+    margin-left: -7px; margin-top: -7px;
+    background: #fff; border-radius: 50%;
+    box-shadow: 0 2px 6px rgba(0,0,0,.5);
+    opacity: 0;
+    transition: opacity .15s ease, transform .15s ease;
+    pointer-events: none;
+    left: 0;
+  }
+  .controls .progress:hover .handle,
+  .controls .progress.dragging .handle { opacity: 1; }
+  .controls .progress.dragging .handle { transform: scale(1.2); }
+  .controls .btn-row {
+    display: flex; align-items: center; justify-content: center;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .controls .btn-row .btn {
+    padding: 8px 12px;
+  }
+  .controls .btn-row .tool-sep {
+    width: 1px; height: 20px; background: #2a2f37; margin: 0 2px;
+  }
+  .controls .btn-row .btn.play-btn {
+    background: #e82127; border-color: #e82127; color: #fff;
+    padding: 8px 24px;
+    font-size: 14px;
+  }
+  .controls .btn-row .btn.play-btn:hover {
+    background: #ff2d33; border-color: #ff2d33;
+  }
+  .controls .speed-pill {
+    background: #1f242b; color: #b6bdc7;
+    border: 1px solid #2a2f37; border-radius: 16px;
+    padding: 4px 10px; font-size: 12px;
+    cursor: pointer;
+  }
+  .controls .speed-pill:hover { background: #2a3038; }
+
+  /* ============================================================
+     右侧详情面板
+     ============================================================ */
+  .detail-block {
+    padding: 14px 16px;
+    border-bottom: 1px solid #1a1e24;
+  }
+  .detail-block .label {
+    font-size: 11px; font-weight: 600;
+    color: #8a93a0; text-transform: uppercase; letter-spacing: .5px;
+    margin-bottom: 8px;
+  }
+  .detail-block .value {
+    font-size: 14px; color: #e6e8eb;
+  }
+  .detail-block .list {
+    list-style: none; padding: 0; margin: 0;
+  }
+  .detail-block .list li {
+    display: flex; justify-content: space-between;
+    padding: 6px 0;
+    font-size: 12px;
+    border-bottom: 1px dashed #1a1e24;
+  }
+  .detail-block .list li:last-child { border-bottom: none; }
+  .detail-block .list li .k { color: #8a93a0; }
+  .detail-block .list li .v { color: #e6e8eb; font-variant-numeric: tabular-nums; }
+
+  /* 段切换器 */
+  .seg-list {
+    padding: 8px 0;
+  }
+  .seg-list .seg-item {
+    padding: 8px 16px;
+    display: flex; align-items: center; gap: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    border-left: 3px solid transparent;
+  }
+  .seg-list .seg-item:hover { background: #16191d; }
+  .seg-list .seg-item.active {
+    background: #1a1f26;
+    border-left-color: #e82127;
+  }
+  .seg-list .seg-item .seg-time {
+    color: #e6e8eb; font-variant-numeric: tabular-nums;
+    min-width: 70px;
+  }
+  .seg-list .seg-item .seg-cams {
+    color: #8a93a0; font-size: 11px;
+  }
+
+  /* ============================================================
+     状态提示（toast）
+     ============================================================ */
+  .toast-wrap {
+    position: fixed; top: 76px; bottom: auto; left: 50%;
+    transform: translateX(-50%);
+    z-index: 999;
+    pointer-events: none;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .toast {
+    background: #1a1e24;
+    border: 1px solid #2a2f37;
+    color: #e6e8eb;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-size: 13px;
+    margin-bottom: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    display: flex; align-items: center; gap: 10px;
+    animation: toastIn .25s ease;
+  }
+  .toast.error { border-color: #e82127; }
+  .toast.success { border-color: #2db870; }
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateY(-20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* 滚动条 */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: #2a2f37; border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: #3a4150; }
+
+  /* 快捷键提示 */
+  .kbd {
+    display: inline-block;
+    padding: 1px 6px;
+    background: #1f242b;
+    border: 1px solid #2a2f37;
+    border-radius: 4px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: #b6bdc7;
+  }
+
+  /* 隐藏的文件输入 */
+  .hidden-input {
+    position: absolute; left: -9999px; opacity: 0;
+  }
+
+  /* ============================================================
+     进度条上的裁剪选区（入点 / 出点可视化 + 可拖动手柄）
+     ============================================================ */
+  .controls .progress .selection {
+    position: absolute; left: 0; right: 0;
+    top: -5px; bottom: -5px;
+    pointer-events: none;
+    z-index: 3;
+    display: none;
+  }
+  .controls .progress .selection.active { display: block; }
+  .controls .progress .selection .sel-range {
+    position: absolute; top: 5px; bottom: 5px;
+    background: rgba(74, 144, 226, .42);
+    border-left: 2px solid #5ba7ff;
+    border-right: 2px solid #5ba7ff;
+    box-sizing: border-box;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
+  }
+  .controls .progress .selection .sel-handle {
+    position: absolute; top: 50%;
+    width: 12px; height: 20px;
+    margin-left: -6px; margin-top: -10px;
+    background: #4a90e2;
+    border: 2px solid #fff;
+    border-radius: 3px;
+    box-shadow: 0 1px 5px rgba(0,0,0,.7);
+    pointer-events: auto;
+    cursor: ew-resize;
+    z-index: 4;
+  }
+  .controls .progress .selection .sel-handle:hover { background: #5ba0f2; }
+
+  /* ============================================================
+     剪辑与导出 模态面板
+     ============================================================ */
+  .modal-mask {
+    position: fixed; inset: 0; z-index: 1000;
+    background: transparent;
+    pointer-events: none;       /* 不拦截主界面交互：可一边看视频一边剪辑 */
+    display: none;
+    justify-content: flex-end;
+  }
+  .modal-mask.show { display: flex; }
+  .modal {
+    pointer-events: auto;
+    width: 460px; max-width: 100%;
+    height: 100%;
+    background: #12161b;
+    border-left: 1px solid #2a2f37;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    box-shadow: -18px 0 48px rgba(0,0,0,.72);
+    animation: drawerIn .2s ease;
+  }
+  @keyframes drawerIn {
+    from { transform: translateX(24px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid #232830;
+    background: #0f1216;
+    flex: 0 0 auto;
+  }
+  .modal-title { font-size: 15px; font-weight: 600; }
+  .modal-close {
+    background: transparent; border: none; color: #8a93a0;
+    font-size: 16px; padding: 4px 9px; border-radius: 6px;
+  }
+  .modal-close:hover { background: #1f242b; color: #e6e8eb; }
+  .modal-body { overflow-y: auto; padding: 4px 20px 14px; flex: 1 1 auto; min-height: 0; }
+  .modal-footer {
+    flex: 0 0 auto;
+    border-top: 1px solid #232830;
+    padding: 12px 20px;
+    background: #0f1216;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .m-sec { padding: 14px 0; border-bottom: 1px dashed #1f242b; }
+  .m-sec:last-child { border-bottom: none; }
+  .m-sec-title {
+    font-size: 12px; font-weight: 600; color: #8a93a0;
+    letter-spacing: .5px;
+    margin-bottom: 10px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px;
+  }
+  .m-sec-title .badge2 {
+    background: #1f242b; color: #b6bdc7;
+    padding: 3px 9px; border-radius: 10px; font-size: 11px; font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+  .sel-box { background: #0f1216; border: 1px solid #1f242b; border-radius: 8px; padding: 12px 14px; }
+  .sel-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .sel-row:last-child { margin-bottom: 0; }
+  .sel-row .lbl { color: #8a93a0; font-size: 12px; min-width: 62px; }
+  .sel-row .val { color: #e6e8eb; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .sel-row .unit { color: #5a6068; font-size: 12px; }
+  .sel-row input.num {
+    width: 92px; background: #1f242b; color: #e6e8eb;
+    border: 1px solid #2a2f37; border-radius: 6px;
+    padding: 6px 8px; font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    outline: none;
+  }
+  .sel-row input.num:focus { border-color: #4a90e2; }
+  button.mini {
+    background: #1f242b; color: #b6bdc7;
+    border: 1px solid #2a2f37; border-radius: 5px;
+    padding: 4px 7px; font-size: 11px;
+  }
+  button.mini:hover { background: #2a3038; color: #e6e8eb; }
+  .sel-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .hint-line { font-size: 12px; color: #6b7280; margin-top: 8px; line-height: 1.65; }
+  .hint-line.warn { color: #d9a441; }
+  .clip-list {
+    max-height: 190px; overflow-y: auto;
+    border: 1px solid #1f242b; border-radius: 8px; background: #0f1216;
+  }
+  .clip-list .clip-empty {
+    padding: 18px 14px; color: #5a6068; font-size: 12px;
+    text-align: center; line-height: 1.7;
+  }
+  .clip-row {
+    display: grid;
+    grid-template-columns: 22px 92px 1fr 50px 26px;
+    align-items: center; gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #1a1e24;
+    font-size: 12px;
+  }
+  .clip-row:last-child { border-bottom: none; }
+  .clip-row .clip-idx { color: #5a6068; }
+  .clip-row .clip-time { color: #b6bdc7; font-variant-numeric: tabular-nums; }
+  .clip-row .clip-range { color: #e6e8eb; font-variant-numeric: tabular-nums; }
+  .clip-row .clip-dur { color: #8a93a0; font-variant-numeric: tabular-nums; }
+  .clip-row .clip-del {
+    background: transparent; border: none; color: #6b7280;
+    font-size: 13px; padding: 2px 6px; border-radius: 5px;
+  }
+  .clip-row .clip-del:hover { background: #3d0d10; color: #ff8085; }
+  .opt-grid {
+    display: grid; grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+  }
+  .opt { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; color: #8a93a0; }
+  .opt > span { flex: 0 0 auto; }
+  .opt select {
+    flex: 1 1 auto; min-width: 0;
+    background: #1f242b; color: #e6e8eb;
+    border: 1px solid #2a2f37; border-radius: 6px;
+    padding: 6px 8px; font-size: 12px; outline: none;
+  }
+  .opt.checkbox { justify-content: flex-start; gap: 8px; cursor: pointer; }
+  .opt.checkbox input { accent-color: #e82127; width: 15px; height: 15px; }
+  .export-progress { display: flex; flex-direction: column; gap: 6px; }
+  .export-progress .ep-bar { height: 8px; background: #1f242b; border-radius: 4px; overflow: hidden; }
+  .export-progress .ep-fill {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, #ff5055, #e82127);
+    transition: width .2s linear;
+  }
+  .export-progress .ep-text { font-size: 12px; color: #b6bdc7; font-variant-numeric: tabular-nums; }
+  .footer-actions { display: flex; justify-content: flex-end; gap: 10px; }
+</style>
+</head>
+<body>
+
+<!-- ============== 顶部标题栏 ============== -->
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">T</div>
+    <span>Tesla 行车记录仪查看器</span>
+  </div>
+  <div class="toolbar">
+    <button class="btn primary" id="pickFolderBtn">
+      <span>📁</span>
+      <span id="pickFolderLabel">选择 TeslaCam 文件夹</span>
+    </button>
+    <div class="group">
+      <label>浏览</label>
+      <select id="browseMode">
+        <option value="date">按日期</option>
+        <option value="saved">仅手动事件</option>
+        <option value="sentry">仅哨兵事件</option>
+        <option value="recent">仅最近录制</option>
+      </select>
+    </div>
+    <div class="group">
+      <label>布局</label>
+      <select id="layoutMode">
+        <option value="layout-2h">前 + 后（默认）</option>
+        <option value="layout-2v">上 + 下</option>
+        <option value="layout-4">四路（前 / 后 / 左 / 右）</option>
+        <option value="layout-pip">画中画</option>
+        <option value="layout-1">单画面（聚焦前）</option>
+      </select>
+    </div>
+    <button class="btn" id="clipBtn" title="剪辑并导出视频 (C)">✂️ 剪辑导出</button>
+    <button class="btn" id="shortcutBtn" title="键盘快捷键">⌨️ 快捷键</button>
+  </div>
+</header>
+
+<!-- ============== 主体三栏 ============== -->
+<div class="app">
+
+  <!-- 左侧：日期 + 事件列表 -->
+  <aside class="left-panel">
+    <div class="panel-header">
+      <span id="leftHeaderTitle">录制列表</span>
+      <span class="count" id="leftCount">0</span>
+    </div>
+    <div id="eventList"></div>
+  </aside>
+
+  <!-- 中央：播放器 -->
+  <section class="player-area">
+    <div class="player-stage" id="playerStage">
+      <div class="empty-state" id="emptyState">
+        <div class="icon">🚗</div>
+        <h2>Tesla 行车记录仪查看器</h2>
+        <p>请将 Tesla 行车记录仪 U 盘插入电脑，然后点击右上角"选择 TeslaCam 文件夹"按钮，选择 U 盘下的 <code style="background:#1f242b;padding:2px 6px;border-radius:4px;">TeslaCam</code> 文件夹。</p>
+        <div class="hint">
+          <strong>说明</strong><br>
+          • 所有视频只在本地浏览器里播放，<strong>不会上传到任何服务器</strong>。<br>
+          • 支持浏览 RecentClips（最近录制）、SavedClips（手动保存事件）、SentryClips（哨兵事件）。<br>
+          • 同时支持 4 个摄像头（前 / 后 / 左后视 / 右后视）同步回放。<br>
+          • 推荐使用 Chrome、Edge 或其他基于 Chromium 的浏览器。<br>
+          • 如果浏览器要求 HTTPS 服务，请双击同目录下的 <code style="background:#1f242b;padding:2px 6px;border-radius:4px;">启动本地服务.bat</code>（仅本机使用，不会联网）。
+        </div>
+      </div>
+      <div class="video-grid layout-2h" id="videoGrid" style="display:none;"></div>
+    </div>
+
+    <div class="controls">
+      <div class="row1">
+        <div class="time-info">
+          <span class="current" id="currentTime">0:00</span>
+          <span class="sep">/</span>
+          <span id="durationTime">0:00</span>
+        </div>
+        <div class="progress" id="progressBar">
+          <div class="fill" id="progressFill"></div>
+          <div class="selection" id="selectionLayer">
+            <div class="sel-range" id="selRange"></div>
+            <div class="sel-handle" id="selStartHandle" title="拖动调整裁剪起点"></div>
+            <div class="sel-handle" id="selEndHandle" title="拖动调整裁剪终点"></div>
+          </div>
+          <div class="handle" id="progressHandle"></div>
+        </div>
+        <div class="seg-info" id="segInfo">未加载</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn" id="prevSegBtn" title="上一段 (←)">⏮ 上一段</button>
+        <button class="btn play-btn" id="playBtn" title="播放/暂停 (空格)">▶ 播放</button>
+        <button class="btn" id="nextSegBtn" title="下一段 (→)">下一段 ⏭</button>
+        <span class="tool-sep"></span>
+        <button class="btn" id="markInBtn" title="把当前位置设为裁剪起点 (I)">⇤ 入点</button>
+        <button class="btn" id="markOutBtn" title="把当前位置设为裁剪终点 (O)">出点 ⇥</button>
+        <button class="speed-pill" id="speedBtn" title="播放速度 (S)">速度 1×</button>
+        <button class="btn icon-only" id="muteBtn" title="静音 (M)">🔊</button>
+        <button class="btn icon-only" id="fsBtn" title="全屏 (F)">⛶</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 右侧：段列表 + 元数据 -->
+  <aside class="right-panel">
+    <div class="panel-header">
+      <span>段列表</span>
+      <span class="count" id="segCount">0</span>
+    </div>
+    <div class="seg-list" id="segList"></div>
+
+    <div class="detail-block">
+      <div class="label">当前段信息</div>
+      <ul class="list">
+        <li><span class="k">时间</span><span class="v" id="segTimestamp">—</span></li>
+        <li><span class="k">类型</span><span class="v" id="segType">—</span></li>
+        <li><span class="k">摄像头</span><span class="v" id="segCameras">—</span></li>
+        <li><span class="k">文件</span><span class="v" id="segFiles">—</span></li>
+        <li><span class="k">时长</span><span class="v" id="segDuration">—</span></li>
+      </ul>
+    </div>
+
+    <div class="detail-block">
+      <div class="label">快捷键</div>
+      <ul class="list">
+        <li><span class="k"><span class="kbd">Space</span></span><span class="v">播放 / 暂停</span></li>
+        <li><span class="k"><span class="kbd">←</span> / <span class="kbd">→</span></span><span class="v">上一段 / 下一段</span></li>
+        <li><span class="k"><span class="kbd">↑</span> / <span class="kbd">↓</span></span><span class="v">上一个 / 下一个事件</span></li>
+        <li><span class="k"><span class="kbd">L</span></span><span class="v">切换布局</span></li>
+        <li><span class="k"><span class="kbd">S</span></span><span class="v">切换速度</span></li>
+        <li><span class="k"><span class="kbd">F</span></span><span class="v">全屏</span></li>
+        <li><span class="k"><span class="kbd">M</span></span><span class="v">静音</span></li>
+        <li><span class="k"><span class="kbd">I</span> / <span class="kbd">O</span></span><span class="v">标记裁剪入点 / 出点</span></li>
+        <li><span class="k"><span class="kbd">P</span></span><span class="v">预览裁剪选区</span></li>
+        <li><span class="k"><span class="kbd">C</span></span><span class="v">打开剪辑导出面板</span></li>
+      </ul>
+    </div>
+  </aside>
+</div>
+
+<!-- 隐藏的文件选择输入 -->
+<input type="file" id="fileInput" class="hidden-input"
+       webkitdirectory directory multiple accept="video/mp4,video/quicktime">
+
+<!-- Toast 容器 -->
+<div class="toast-wrap" id="toastWrap"></div>
+
+<!-- ============== 剪辑与导出 面板 ============== -->
+<div class="modal-mask" id="clipModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">✂️ 剪辑与导出</div>
+      <button class="modal-close" id="clipModalClose" title="关闭">✕</button>
+    </div>
+
+    <div class="modal-body">
+
+      <!-- 1. 选区 -->
+      <section class="m-sec">
+        <div class="m-sec-title"><span>① 设定裁剪区间（针对当前播放的这一段）</span></div>
+        <div class="sel-box">
+          <div class="sel-row">
+            <span class="lbl">当前段</span>
+            <span class="val" id="selSegText">尚未加载视频</span>
+          </div>
+          <div class="sel-row">
+            <label class="lbl" for="selStartInput">起点</label>
+            <input type="number" id="selStartInput" class="num" step="0.1" min="0">
+            <span class="unit">秒</span>
+            <button class="mini" data-adj="start:-1">−1s</button>
+            <button class="mini" data-adj="start:-0.1">−0.1</button>
+            <button class="mini" data-adj="start:0.1">+0.1</button>
+            <button class="mini" data-adj="start:1">+1s</button>
+          </div>
+          <div class="sel-row">
+            <label class="lbl" for="selEndInput">终点</label>
+            <input type="number" id="selEndInput" class="num" step="0.1" min="0">
+            <span class="unit">秒</span>
+            <button class="mini" data-adj="end:-1">−1s</button>
+            <button class="mini" data-adj="end:-0.1">−0.1</button>
+            <button class="mini" data-adj="end:0.1">+0.1</button>
+            <button class="mini" data-adj="end:1">+1s</button>
+          </div>
+          <div class="sel-row">
+            <span class="lbl">选区时长</span>
+            <span class="val" id="selDurText">0.0 秒</span>
+          </div>
+          <div class="sel-actions">
+            <button class="btn" id="useCurrentInBtn">用当前位置作起点 (I)</button>
+            <button class="btn" id="useCurrentOutBtn">用当前位置作终点 (O)</button>
+            <button class="btn" id="previewSelBtn">预览选区 (P)</button>
+            <button class="btn" id="clearSelBtn">清除选区</button>
+          </div>
+        </div>
+        <div class="hint-line">
+          提示：也可以直接在主界面进度条上拖拽两端的 <strong style="color:#4a90e2;">蓝色手柄</strong> 调整起止点；
+          播放时按 <span class="kbd">I</span> / <span class="kbd">O</span> 可快速打点。
+        </div>
+      </section>
+
+      <!-- 2. 剪辑列表 -->
+      <section class="m-sec">
+        <div class="m-sec-title">
+          <span>② 剪辑列表（导出时按顺序拼接）</span>
+          <span class="badge2"><span id="clipCount">0</span> 项 · 共 <span id="clipTotal">0:00.0</span></span>
+        </div>
+        <div class="clip-list" id="clipList"></div>
+        <div class="sel-actions">
+          <button class="btn primary" id="addClipBtn">＋ 把当前选区加入列表</button>
+          <button class="btn" id="clearClipsBtn">清空列表</button>
+        </div>
+      </section>
+
+      <!-- 3. 导出设置 -->
+      <section class="m-sec">
+        <div class="m-sec-title"><span>③ 导出设置</span></div>
+        <div class="opt-grid">
+          <label class="opt"><span>画面布局</span>
+            <select id="exportLayout">
+              <option value="current">跟随当前布局</option>
+              <option value="layout-2h">前 + 后（左右）</option>
+              <option value="layout-2v">前 + 后（上下）</option>
+              <option value="layout-4">四路（前 / 后 / 左 / 右）</option>
+              <option value="layout-pip">画中画</option>
+              <option value="layout-1">单画面（仅前摄）</option>
+            </select>
+          </label>
+          <label class="opt"><span>输出画质</span>
+            <select id="exportQuality">
+              <option value="1080">1080p</option>
+              <option value="720">720p</option>
+              <option value="1440">1440p</option>
+              <option value="src">源分辨率</option>
+            </select>
+          </label>
+          <label class="opt"><span>帧率</span>
+            <select id="exportFps">
+              <option value="30">30 fps</option>
+              <option value="25">25 fps</option>
+              <option value="24">24 fps</option>
+              <option value="15">15 fps</option>
+            </select>
+          </label>
+          <label class="opt"><span>文件格式</span>
+            <select id="exportFormat">
+              <option value="auto">自动（优先 MP4）</option>
+              <option value="mp4">MP4 (H.264)</option>
+              <option value="webm">WebM (VP9)</option>
+            </select>
+          </label>
+          <label class="opt"><span>导出速度</span>
+            <select id="exportSpeed">
+              <option value="1">1× 实时（不丢帧）</option>
+              <option value="2">2× 加速（可能丢帧）</option>
+              <option value="4">4× 加速（明显丢帧）</option>
+            </select>
+          </label>
+          <label class="opt checkbox"><input type="checkbox" id="exportWatermark" checked><span>烧录时间水印</span></label>
+        </div>
+        <div class="hint-line" id="exportSizeHint">预计输出分辨率：加载视频后显示</div>
+        <div class="hint-line warn">
+          导出使用浏览器实时录制（MediaRecorder）：<strong>1 分钟片段约需 1 分钟</strong>（1× 时）。
+          导出期间请保持本标签页在前台，切到后台会被浏览器降频，导致耗时变长或掉帧。
+        </div>
+      </section>
+
+    </div>
+
+    <div class="modal-footer">
+      <div class="export-progress" id="exportProgressWrap" style="display:none;">
+        <div class="ep-bar"><div class="ep-fill" id="exportProgressBar"></div></div>
+        <div class="ep-text" id="exportProgressText"></div>
+      </div>
+      <div class="footer-actions">
+        <button class="btn" id="exportCancelBtn" disabled>停止并保存</button>
+        <button class="btn primary" id="exportStartBtn">开始导出</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   常量与全局状态
+   ============================================================ */
+const CAMERA_LABELS = {
+  front: '前',
+  back: '后',
+  left_repeater: '左后视',
+  right_repeater: '右后视',
+  left_pillar: '左 B 柱',
+  right_pillar: '右 B 柱',
+  narrow_front: '长焦前',
+  wide_front: '广角前',
+  // 兼容旧版
+  left: '左后视',
+  right: '右后视',
+  rear: '后',
+};
+const CAMERA_FULL_LIST = ['front', 'back', 'left_repeater', 'right_repeater', 'left_pillar', 'right_pillar'];
+const TIMESTAMP_RE = /^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/;
+
+const state = {
+  files: [],              // 所有扫描出的 mp4 文件对象
+  segments: [],           // 解析后的段数组
+  filteredSegments: [],   // 当前浏览模式过滤后的段
+  currentSegmentIdx: -1,  // 当前播放段在 filteredSegments 中的索引
+  videos: [],             // 当前正在播放的 <video> DOM 元素
+  isPlaying: false,
+  muted: true,             // TeslaCam 无音轨；默认静音便于浏览器 autoplay
+  speed: 1,
+  duration: 0,
+  rootPath: '',           // 当前根目录名（用于显示）
+  layoutMode: 'layout-2h',
+  // ---- 剪辑与导出 ----
+  sel: { active: false, start: 0, end: 0, segId: null }, // 当前段内的裁剪选区（秒）
+  exportClips: [],        // 待导出的剪辑列表
+  exporting: false,       // 是否正在导出
+  exportCancel: false,    // 导出取消标志
+};
+
+/* ============================================================
+   工具函数
+   ============================================================ */
+function $(id) { return document.getElementById(id); }
+function pad(n) { return n < 10 ? '0' + n : '' + n; }
+function formatTime(sec) {
+  if (!isFinite(sec) || sec < 0) sec = 0;
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${pad(s)}`;
+}
+function formatTimestamp(d) {
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+function formatRelativeDay(d) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const target = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diffDays = Math.round((today - target) / (24 * 3600 * 1000));
+  if (diffDays === 0) return '今天';
+  if (diffDays === 1) return '昨天';
+  if (diffDays < 7) return `${diffDays} 天前`;
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+function getCameraType(filename) {
+  const lower = filename.toLowerCase();
+  // 按优先级匹配
+  for (const key of Object.keys(CAMERA_LABELS)) {
+    if (lower.includes(key)) return key;
+  }
+  return 'unknown';
+}
+function parseTimestampFromName(name) {
+  // 支持前缀时间戳 2026-09-12_14-30-00 或者父目录名
+  const m = name.match(TIMESTAMP_RE);
+  if (!m) return null;
+  const [, y, mo, d, h, mi, s] = m;
+  return new Date(+y, +mo - 1, +d, +h, +mi, +s);
+}
+function showToast(msg, type) {
+  const wrap = $('toastWrap');
+  const t = document.createElement('div');
+  t.className = 'toast' + (type ? ' ' + type : '');
+  let icon = 'ℹ️';
+  if (type === 'error') icon = '⚠️';
+  else if (type === 'success') icon = '✅';
+  t.innerHTML = `<span>${icon}</span><span>${msg}</span>`;
+  wrap.appendChild(t);
+  setTimeout(() => {
+    t.style.transition = 'opacity .25s, transform .25s';
+    t.style.opacity = '0';
+    t.style.transform = 'translateY(-20px)';
+    setTimeout(() => t.remove(), 300);
+  }, 3000);
+}
+
+/* ============================================================
+   步骤 1：让用户选择 TeslaCam 文件夹
+   ============================================================ */
+async function pickTeslaCamFolder() {
+  // 优先尝试 File System Access API（提供更好的体验，可记忆文件夹）
+  if (window.showDirectoryPicker && window.isSecureContext) {
+    try {
+      const dir = await window.showDirectoryPicker({
+        id: 'teslacam-folder',
+        mode: 'read',
+      });
+      // 验证是否包含 TeslaCam 子目录
+      let isTeslaCam = dir.name === 'TeslaCam' || dir.name === 'TeslaCam (1)';
+      if (!isTeslaCam) {
+        // 尝试进入子目录找 TeslaCam
+        try {
+          const sub = await dir.getDirectoryHandle('TeslaCam');
+          // 是的，找到了，所以根目录是父目录
+          return await walkFSAPI(sub);
+        } catch (e) {
+          // 没找到，假设用户选的就是 TeslaCam
+        }
+      }
+      return await walkFSAPI(dir);
+    } catch (e) {
+      if (e.name === 'AbortError') return null; // 用户取消
+      // 降级到 webkitdirectory
+      console.warn('File System Access API 失败，降级到文件夹选择', e);
+    }
+  }
+  // 降级方案：传统文件选择
+  return new Promise((resolve) => {
+    const input = $('fileInput');
+    input.value = '';
+    input.onchange = async () => {
+      const files = Array.from(input.files);
+      if (files.length === 0) { resolve(null); return; }
+      const result = await walkWebkitFiles(files);
+      resolve(result);
+    };
+    input.click();
+  });
+}
+
+/* 用 FileSystemFileHandle（File System Access API）遍历目录 */
+async function walkFSAPI(dirHandle, relPath = '') {
+  const files = [];
+  for await (const [name, handle] of dirHandle.entries()) {
+    const currentPath = relPath ? `${relPath}/${name}` : name;
+    if (handle.kind === 'directory') {
+      const sub = await walkFSAPI(handle, currentPath);
+      files.push(...sub);
+    } else if (handle.kind === 'file') {
+      if (!/\.(mp4|mov)$/i.test(name)) continue;
+      const file = await handle.getFile();
+      file._relativePath = currentPath;
+      file._webkitRelativePath = currentPath; // 兼容
+      files.push(file);
+    }
+  }
+  return files;
+}
+
+/* 用 FileList 遍历（webkitdirectory 方案） */
+async function walkWebkitFiles(fileList) {
+  const out = [];
+  for (const f of fileList) {
+    if (!/\.(mp4|mov)$/i.test(f.name)) continue;
+    out.push(f);
+  }
+  // 从第一个文件推断根路径
+  if (out.length > 0) {
+    const rp = out[0].webkitRelativePath;
+    const parts = rp.split('/');
+    // 第一段是用户选择的根目录名（可能是 TeslaCam 也可能是父目录）
+    if (parts.length > 1) {
+      const rootName = parts[0];
+      if (rootName.toLowerCase() === 'teslacam') {
+        state.rootPath = 'TeslaCam';
+      } else {
+        // 可能是选了 U 盘根目录，过滤出第一段是 TeslaCam 的文件
+        const teslacamFiles = out.filter(f =>
+          f.webkitRelativePath.replace(/\\/g, '/').split('/')[1]?.toLowerCase() === 'teslacam'
+        );
+        if (teslacamFiles.length > 0) {
+          state.rootPath = `${rootName}/TeslaCam`;
+          return teslacamFiles;
+        }
+        state.rootPath = rootName + '（未发现 TeslaCam 子目录，仍尝试识别）';
+      }
+    }
+  }
+  return out;
+}
+
+/* ============================================================
+   步骤 2：解析文件为段（segment）模型
+   ============================================================ */
+function parseFilesToSegments(files) {
+  // 文件归类：
+  //   TeslaCam/SavedClips/2026-09-12_14-30-00/front.mp4
+  //     -> segmentKey = "2026-09-12_14-30-00", source = 'saved'
+  //   TeslaCam/SentryClips/2026-09-12_14-30-00/back.mp4
+  //     -> segmentKey = "2026-09-12_14-30-00", source = 'sentry'
+  //   TeslaCam/RecentClips/2026-09-12_14-30-00-front.mp4
+  //     -> segmentKey = "2026-09-12_14-30-00", source = 'recent'
+
+  const segMap = new Map();  // key -> segment
+
+  for (const file of files) {
+    const rel = (file._relativePath || file.webkitRelativePath || file.name).replace(/\\/g, '/');
+    const parts = rel.split('/');
+
+    let source = null;     // 'saved' | 'sentry' | 'recent'
+    let segmentKey = null; // 'YYYY-MM-DD_HH-MM-SS'
+    let fileTime = null;   // Date
+
+    if (parts.length >= 3 && parts[1].toLowerCase() === 'savedclips') {
+      // TeslaCam/SavedClips/2026-09-12_14-30-00/...mp4
+      source = 'saved';
+      segmentKey = parts[2];
+      fileTime = parseTimestampFromName(parts[2]) || file.lastModified ? new Date(file.lastModified) : null;
+    } else if (parts.length >= 3 && parts[1].toLowerCase() === 'sentryclips') {
+      source = 'sentry';
+      segmentKey = parts[2];
+      fileTime = parseTimestampFromName(parts[2]) || file.lastModified ? new Date(file.lastModified) : null;
+    } else if (parts.length >= 2 && parts[1].toLowerCase() === 'recentclips') {
+      // TeslaCam/RecentClips/2026-09-12_14-30-00-front.mp4
+      source = 'recent';
+      const m = parts[2].match(TIMESTAMP_RE);
+      if (m) {
+        segmentKey = parts[2].slice(0, 19); // YYYY-MM-DD_HH-MM-SS
+        fileTime = parseTimestampFromName(parts[2]);
+      }
+    }
+
+    // 兜底：如果是其它命名（直接放根目录），用文件名时间戳
+    if (!source || !segmentKey) {
+      const m = file.name.match(TIMESTAMP_RE);
+      if (m) {
+        source = 'recent';
+        segmentKey = file.name.slice(0, 19);
+        fileTime = parseTimestampFromName(file.name);
+      } else {
+        // 用修改时间
+        segmentKey = `_unknown_${file.lastModified}`;
+        source = 'recent';
+        fileTime = new Date(file.lastModified);
+      }
+    }
+
+    const cam = getCameraType(file.name);
+    const segId = `${source}|${segmentKey}`;
+
+    if (!segMap.has(segId)) {
+      segMap.set(segId, {
+        id: segId,
+        source,
+        segmentKey,
+        timestamp: fileTime || new Date(0),
+        clips: {},
+        sizeTotal: 0,
+      });
+    }
+    const seg = segMap.get(segId);
+    seg.clips[cam] = file;
+    seg.sizeTotal += file.size;
+
+    // 用最早的非空时间作为段的时间
+    if (fileTime && fileTime.getTime() > 0 && fileTime.getTime() < seg.timestamp.getTime()) {
+      seg.timestamp = fileTime;
+    }
+  }
+
+  const segs = Array.from(segMap.values());
+  // 排序：按时间+来源
+  segs.sort((a, b) => {
+    const t = b.timestamp.getTime() - a.timestamp.getTime();
+    if (t !== 0) return t;
+    // 同时间时 saved > sentry > recent
+    const order = { saved: 0, sentry: 1, recent: 2 };
+    return (order[a.source] ?? 9) - (order[b.source] ?? 9);
+  });
+  return segs;
+}
+
+/* ============================================================
+   步骤 3：UI 渲染
+   ============================================================ */
+function renderEventList() {
+  const segs = state.filteredSegments;
+  const list = $('eventList');
+  list.innerHTML = '';
+
+  if (segs.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.padding = '24px 16px';
+    empty.style.textAlign = 'center';
+    empty.style.color = '#5a6068';
+    empty.style.fontSize = '13px';
+    if (state.segments.length === 0) {
+      empty.textContent = '请先选择 TeslaCam 文件夹';
+    } else {
+      empty.textContent = '当前筛选条件下没有视频';
+    }
+    list.appendChild(empty);
+    $('leftCount').textContent = '0';
+    return;
+  }
+
+  // 按日期分组
+  const groups = new Map();
+  for (const seg of segs) {
+    const d = seg.timestamp;
+    const dateKey = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    if (!groups.has(dateKey)) groups.set(dateKey, []);
+    groups.get(dateKey).push(seg);
+  }
+
+  for (const [dateKey, groupSegs] of groups) {
+    const groupDiv = document.createElement('div');
+    groupDiv.className = 'date-group';
+    const sampleDate = groupSegs[0].timestamp;
+    const header = document.createElement('div');
+    header.className = 'date-header';
+    header.innerHTML = `
+      <span>${formatRelativeDay(sampleDate)} · ${dateKey}</span>
+      <span class="badge">${groupSegs.length}</span>
+    `;
+    groupDiv.appendChild(header);
+
+    for (const seg of groupSegs) {
+      const item = document.createElement('div');
+      item.className = 'event-item';
+      if (state.filteredSegments.indexOf(seg) === state.currentSegmentIdx) {
+        item.classList.add('active');
+      }
+      const d = seg.timestamp;
+      const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+      const camCount = Object.values(seg.clips).filter(Boolean).length;
+      const tagText = seg.source === 'saved' ? '手动保存' :
+                      seg.source === 'sentry' ? '哨兵' : '最近';
+      item.innerHTML = `
+        <div class="dot ${seg.source}"></div>
+        <div class="info">
+          <div class="title">${time}</div>
+          <div class="meta">
+            <span class="tag ${seg.source}">${tagText}</span>
+            <span>${camCount} 路摄像头</span>
+          </div>
+        </div>
+      `;
+      item.addEventListener('click', () => {
+        const idx = state.filteredSegments.indexOf(seg);
+        if (idx >= 0) playSegmentAt(idx);
+      });
+      groupDiv.appendChild(item);
+    }
+    list.appendChild(groupDiv);
+  }
+
+  $('leftCount').textContent = segs.length;
+}
+
+function renderSegList() {
+  const segs = state.filteredSegments;
+  const list = $('segList');
+  list.innerHTML = '';
+  $('segCount').textContent = segs.length;
+
+  segs.forEach((seg, idx) => {
+    const item = document.createElement('div');
+    item.className = 'seg-item';
+    if (idx === state.currentSegmentIdx) item.classList.add('active');
+    const d = seg.timestamp;
+    const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    const cams = Object.entries(seg.clips).filter(([_, f]) => f).map(([c]) => CAMERA_LABELS[c] || c).join(' / ');
+    item.innerHTML = `
+      <span class="seg-time">${time}</span>
+      <span class="seg-cams">${cams || '无'}</span>
+    `;
+    item.addEventListener('click', () => playSegmentAt(idx));
+    list.appendChild(item);
+  });
+}
+
+function updateSegInfo() {
+  const seg = state.filteredSegments[state.currentSegmentIdx];
+  if (!seg) return;
+  const d = seg.timestamp;
+  $('segTimestamp').textContent = formatTimestamp(d);
+  const tag = seg.source === 'saved' ? '手动保存事件' :
+              seg.source === 'sentry' ? '哨兵事件' : '最近录制（循环）';
+  $('segType').textContent = tag;
+  const cams = Object.entries(seg.clips).filter(([_, f]) => f).map(([c]) => CAMERA_LABELS[c] || c);
+  $('segCameras').textContent = cams.join(' · ') || '—';
+  $('segFiles').textContent = `${Object.values(seg.clips).filter(Boolean).length} 个 MP4`;
+  if (state.duration) {
+    $('segDuration').textContent = formatTime(state.duration);
+  } else {
+    $('segDuration').textContent = '—';
+  }
+}
+
+/* ============================================================
+   步骤 4：播放器核心
+   ============================================================ */
+function buildVideoGrid(layout) {
+  const grid = $('videoGrid');
+  grid.className = 'video-grid ' + layout;
+  grid.innerHTML = '';
+
+  // 根据布局决定要显示的摄像头
+  let camsToShow = [];
+  if (layout === 'layout-1') camsToShow = ['front'];
+  else if (layout === 'layout-pip') camsToShow = ['front', 'back'];
+  else if (layout === 'layout-2h' || layout === 'layout-2v') camsToShow = ['front', 'back'];
+  else if (layout === 'layout-4') camsToShow = ['front', 'back', 'left_repeater', 'right_repeater'];
+  else camsToShow = ['front', 'back'];
+
+  // 标记 PIP
+  if (layout === 'layout-pip') grid.classList.add('pip-mode');
+
+  state.videos = [];
+  camsToShow.forEach((cam, idx) => {
+    // 创建容器 cell（这里只创建壳，真正的 <video> 由 loadSegmentToPlayer 注入，
+    // 避免出现"空 video + 真实 video"共存导致播放/同步混乱）
+    const cell = document.createElement('div');
+    cell.className = 'video-cell';
+    cell.dataset.camera = cam;
+
+    const label = document.createElement('div');
+    label.className = 'cam-label';
+    label.innerHTML = `<span class="dot"></span>${CAMERA_LABELS[cam] || cam}`;
+
+    // 时间水印（画中画 PIP 子画面放左上，避免与 PIP 边框重叠）
+    const watermark = document.createElement('div');
+    watermark.className = 'watermark';
+    watermark.textContent = formatTimestamp(new Date());
+    if (layout === 'layout-pip' && idx > 0) {
+      watermark.style.top = '12px';
+      watermark.style.right = 'auto';
+      watermark.style.left = '12px';
+      watermark.style.fontSize = '12px';
+    }
+
+    cell.appendChild(label);
+    cell.appendChild(watermark);
+    grid.appendChild(cell);
+  });
+}
+
+function attachVideoListeners() {
+  // 主视频驱动其他视频同步
+  state.videos.forEach((v) => {
+    v.addEventListener('loadedmetadata', () => {
+      const dur = v.duration;
+      if (isFinite(dur) && dur > state.duration) state.duration = dur;
+      $('durationTime').textContent = formatTime(state.duration);
+      // 在主视频拿到 duration 后，立即同步一次 fill，避免填色条停在 0
+      if (v === state.videos[0]) updateProgressUI(v.currentTime || 0);
+      // 时长变化后重算裁剪选区的比例位置
+      updateSelectionOverlay();
+      updateSegInfo();
+    });
+    v.addEventListener('timeupdate', () => {
+      if (v === state.videos[0]) {
+        // timeupdate 只作 RAF 兜底；RAF 已经在每帧刷 fill
+        updateProgressUI(v.currentTime);
+      }
+      // 同步其他视频
+      const target = v.currentTime;
+      state.videos.forEach(other => {
+        if (other !== v && Math.abs(other.currentTime - target) > 0.2) {
+          other.currentTime = target;
+        }
+      });
+    });
+    v.addEventListener('play', () => {
+      if (v === state.videos[0]) {
+        state.isPlaying = true;
+        $('playBtn').innerHTML = '⏸ 暂停';
+        // 同步播放其他
+        state.videos.slice(1).forEach(o => o.play().catch(() => {}));
+        startProgressRAF();
+      }
+    });
+    v.addEventListener('pause', () => {
+      if (v === state.videos[0]) {
+        state.isPlaying = false;
+        $('playBtn').innerHTML = '▶ 播放';
+        state.videos.slice(1).forEach(o => o.pause());
+        // 保持 RAF 运行，暂停瞬间 fill 也要保持当前位置（避免 jump）
+      }
+    });
+    v.addEventListener('seeked', () => {
+      if (v === state.videos[0]) updateProgressUI(v.currentTime);
+    });
+    v.addEventListener('ended', () => {
+      if (v === state.videos[0]) {
+        // 段播完，自动跳下一段
+        if (state.currentSegmentIdx < state.filteredSegments.length - 1) {
+          playSegmentAt(state.currentSegmentIdx + 1, true);
+        }
+      }
+    });
+    v.addEventListener('error', (e) => {
+      if (v.dataset.hasError) return;
+      v.dataset.hasError = '1';
+      console.warn('视频加载失败', v.src, e);
+    });
+  });
+}
+
+function loadSegmentToPlayer(seg) {
+  if (!seg) return;
+  const grid = $('videoGrid');
+  const stage = $('playerStage');
+  const empty = $('emptyState');
+
+  stage.querySelectorAll('.video-cell').forEach(c => c.remove());
+
+  // 重新构建网格
+  buildVideoGrid(state.layoutMode);
+
+  let loadedCount = 0;
+  const cams = ['front', 'back', 'left_repeater', 'right_repeater', 'left_pillar', 'right_pillar'];
+
+  // 对于 layout-pip，主视图显示 front，PIP 显示 back
+  // 我们已经在 buildVideoGrid 中处理了 camsToShow 列表
+  const activeCells = Array.from(stage.querySelectorAll('.video-cell'));
+
+  activeCells.forEach(cell => {
+    const cam = cell.dataset.camera;
+    const file = seg.clips[cam];
+
+    const label = cell.querySelector('.cam-label');
+    if (label) label.innerHTML = `<span class="dot"></span>${CAMERA_LABELS[cam] || cam}`;
+
+    if (file) {
+      // 创建 video 元素；用 insertBefore 把它放到 watermark 之前
+      const v = document.createElement('video');
+      v.controls = false;
+      v.preload = 'auto';
+      v.playsInline = true;
+      v.muted = state.muted;
+      v.playbackRate = state.speed;
+      v.src = URL.createObjectURL(file);
+      const watermark = cell.querySelector('.watermark');
+      if (watermark) {
+        cell.insertBefore(v, watermark);
+      } else {
+        cell.appendChild(v);
+      }
+    } else {
+      // 该摄像头无视频：用 appendChild 重建占位元素，保留已经存在的 watermark
+      cell.classList.add('missing');
+      const missingInfo = document.createElement('div');
+      missingInfo.className = 'missing-info';
+      missingInfo.style.display = 'flex';
+      missingInfo.style.flexDirection = 'column';
+      missingInfo.style.alignItems = 'center';
+      missingInfo.style.gap = '6px';
+      missingInfo.style.color = '#3a3f47';
+      missingInfo.innerHTML = `<div class="icon" style="font-size:32px;">📷</div><div style="font-size:12px;">该摄像头无视频</div>`;
+      cell.appendChild(missingInfo);
+    }
+  });
+
+  // 找到实际可用的 camera 列表，并设为主视频
+  let mainCam = null;
+  for (const cam of ['front', 'back', 'left_repeater', 'right_repeater', 'left_pillar', 'right_pillar']) {
+    if (seg.clips[cam]) { mainCam = cam; break; }
+  }
+  if (!mainCam) {
+    showToast('这段没有任何可播放的视频文件', 'error');
+    return;
+  }
+  // 确保主摄像头在 videos[0]
+  const cells = Array.from(stage.querySelectorAll('.video-cell'));
+  const mainCell = cells.find(c => c.dataset.camera === mainCam);
+  if (mainCell && cells[0] !== mainCell) {
+    // 把主摄像头放在第一个位置
+    const newOrder = [mainCell, ...cells.filter(c => c !== mainCell)];
+    cells.forEach(c => c.remove());
+    const grid2 = $('videoGrid');
+    newOrder.forEach(c => {
+      // 移除我们之前 buildVideoGrid 加入的元素，重新添加
+      grid2.appendChild(c);
+    });
+  }
+
+  // 收集最终的 video 元素
+  state.videos = Array.from(stage.querySelectorAll('.video-cell video'));
+  attachVideoListeners();
+
+  // 重置播放进度 UI
+  state.duration = 0;
+  $('currentTime').textContent = '0:00';
+  $('durationTime').textContent = '0:00';
+  $('progressFill').style.width = '0%';
+  const handle = $('progressHandle');
+  if (handle) handle.style.left = '0%';
+  updateProgressUI(0);
+  updateSegInfo();
+
+  // 启动水印定时器（每段切换后都重新启动一次）
+  startWatermarkUpdater();
+  // 启动 RAF 持续同步 fill / 水印（不依赖 timeupdate 250ms 节流）
+  startProgressRAF();
+
+  // 同步裁剪选区显示（切段后时长变化，比例需要重算）
+  updateSelectionOverlay();
+  refreshClipPanel();
+
+  // 显示
+  empty.style.display = 'none';
+  grid.style.display = 'grid';
+}
+
+function playSegmentAt(idx, autoPlay = true) {
+  if (idx < 0 || idx >= state.filteredSegments.length) return;
+  state.currentSegmentIdx = idx;
+  const seg = state.filteredSegments[idx];
+  // 选区只对标记它的那一段有效；切到别的段时自动失效，避免误导出
+  if (state.sel.active && state.sel.segId !== seg.id) {
+    state.sel = { active: false, start: 0, end: 0, segId: null };
+  }
+  state._previewStopAt = null;
+  loadSegmentToPlayer(seg);
+  renderEventList();   // 更新 active 高亮
+  renderSegList();
+
+  $('segInfo').textContent = `段 ${idx + 1} / ${state.filteredSegments.length}`;
+
+  if (autoPlay) {
+    // 等首个 video 加载完开始播放
+    const tryPlay = () => {
+      if (state.videos[0] && state.videos[0].readyState >= 2) {
+        state.videos[0].play().catch(err => {
+          console.warn('自动播放被阻止', err);
+        });
+      } else if (state.videos[0]) {
+        state.videos[0].addEventListener('canplay', () => {
+          state.videos[0].play().catch(() => {});
+        }, { once: true });
+      }
+    };
+    // 给一点时间让其他摄像头也加载
+    setTimeout(tryPlay, 100);
+  }
+}
+
+/* ============================================================
+   步骤 5：入口
+   ============================================================ */
+async function startLoading() {
+  $('pickFolderLabel').textContent = '正在加载...';
+  $('pickFolderBtn').disabled = true;
+
+  let files = null;
+  try {
+    files = await pickTeslaCamFolder();
+  } catch (e) {
+    console.error(e);
+    showToast('选择文件夹失败：' + (e.message || e), 'error');
+    $('pickFolderLabel').textContent = '选择 TeslaCam 文件夹';
+    $('pickFolderBtn').disabled = false;
+    return;
+  }
+
+  if (!files || files.length === 0) {
+    $('pickFolderLabel').textContent = '选择 TeslaCam 文件夹';
+    $('pickFolderBtn').disabled = false;
+    return;
+  }
+
+  state.files = files;
+  state.segments = parseFilesToSegments(files);
+  // 换了数据源，清空上一次的剪辑列表与选区
+  state.sel = { active: false, start: 0, end: 0, segId: null };
+  state.exportClips = [];
+  refreshClipPanel();
+
+  if (state.segments.length === 0) {
+    showToast('没有找到任何可识别的 Tesla 行车记录视频', 'error');
+    $('pickFolderLabel').textContent = '选择 TeslaCam 文件夹';
+    $('pickFolderBtn').disabled = false;
+    return;
+  }
+
+  // 按当前浏览模式过滤
+  applyBrowseFilter();
+  renderEventList();
+  renderSegList();
+
+  // 显示成功
+  const saved = state.segments.filter(s => s.source === 'saved').length;
+  const sentry = state.segments.filter(s => s.source === 'sentry').length;
+  const recent = state.segments.filter(s => s.source === 'recent').length;
+  showToast(`已加载 ${state.segments.length} 段视频（手动 ${saved} / 哨兵 ${sentry} / 最近 ${recent}）`, 'success');
+
+  // 自动播放第一段
+  if (state.filteredSegments.length > 0) {
+    playSegmentAt(0, false);
+  }
+
+  $('pickFolderLabel').textContent = `已加载 ${state.segments.length} 段 · 重新选择`;
+  $('pickFolderBtn').disabled = false;
+}
+
+function applyBrowseFilter() {
+  const mode = $('browseMode').value;
+  let segs = state.segments;
+  if (mode === 'saved') segs = segs.filter(s => s.source === 'saved');
+  else if (mode === 'sentry') segs = segs.filter(s => s.source === 'sentry');
+  else if (mode === 'recent') segs = segs.filter(s => s.source === 'recent');
+
+  state.filteredSegments = segs;
+  // 保持当前播放进度（如果当前段还在新过滤后列表中）
+  const cur = state.filteredSegments[state.currentSegmentIdx];
+  if (!cur && state.currentSegmentIdx >= segs.length) {
+    state.currentSegmentIdx = -1;
+  }
+  $('leftHeaderTitle').textContent = mode === 'date' ? '按日期浏览' :
+                                     mode === 'saved' ? '手动保存事件' :
+                                     mode === 'sentry' ? '哨兵事件' :
+                                     '最近录制';
+  renderEventList();
+  renderSegList();
+}
+
+/* ============================================================
+   统一的播放/暂停切换（兼顾按钮点击与键盘空格）
+   ============================================================ */
+function togglePlay() {
+  if (!state.videos.length || !state.videos[0]) {
+    showToast('请先选择 TeslaCam 文件夹', 'error');
+    return;
+  }
+  const v = state.videos[0];
+  // 直接使用 video 元素的 paused 状态，避免与异步 play() 状态竞争
+  if (v.paused) {
+    const p = v.play();
+    if (p && typeof p.then === 'function') {
+      p.then(() => {
+        state.isPlaying = true;
+        $('playBtn').innerHTML = '⏸ 暂停';
+      }).catch(err => {
+        // 浏览器自动播放策略可能要求静音，强制静音再试一次
+        if (v.muted === false) {
+          v.muted = true;
+          state.muted = true;
+          $('muteBtn').textContent = '🔇';
+          v.play().then(() => {
+            state.isPlaying = true;
+            $('playBtn').innerHTML = '⏸ 暂停';
+          }).catch(err2 => {
+            showToast('播放失败：' + (err2.message || '请先点击页面任意位置'), 'error');
+          });
+        } else {
+          showToast('播放失败：' + (err.message || '请重新选择视频'), 'error');
+        }
+      });
+    }
+  } else {
+    v.pause();
+    state.isPlaying = false;
+    $('playBtn').innerHTML = '▶ 播放';
+  }
+}
+
+/* 进度条 UI 同步：填充条 + 圆形把手 + 时间文本 */
+function updateProgressUI(currentTime) {
+  if (!isFinite(currentTime) || currentTime < 0) currentTime = 0;
+  $('currentTime').textContent = formatTime(currentTime);
+  if (!state.duration || !isFinite(state.duration) || state.duration <= 0) {
+    // 总时长还没拿到（如刚切段、video 还没 loadedmetadata），先保证文本最新
+    return;
+  }
+  const p = Math.max(0, Math.min(100, (currentTime / state.duration) * 100));
+  const fill = $('progressFill');
+  const handle = $('progressHandle');
+  if (fill) fill.style.width = p + '%';
+  if (handle) handle.style.left = p + '%';
+}
+
+/* requestAnimationFrame 驱动的进度条 / 水印刷新（每帧 60fps），
+   不依赖 timeupdate 事件约 250ms 的节流，避免布局切换或低帧率下进度条"卡住"的视觉感受 */
+function startProgressRAF() {
+  if (window._progressRAF) cancelAnimationFrame(window._progressRAF);
+  function tick() {
+    const v = state.videos[0];
+    if (v && isFinite(v.currentTime)) {
+      // 选区预览：到达出点后自动暂停
+      if (state._previewStopAt != null && v.currentTime >= state._previewStopAt) {
+        state._previewStopAt = null;
+        v.pause();
+      }
+      updateProgressUI(v.currentTime);
+      // 水印也顺手跟当前帧同步；秒级跳变由 setInterval 触发更省
+      const seg = state.filteredSegments[state.currentSegmentIdx];
+      if (seg) {
+        const base = new Date(seg.timestamp.getTime());
+        if (isFinite(v.currentTime) && v.currentTime > 0) {
+          base.setSeconds(base.getSeconds() + Math.floor(v.currentTime));
+        }
+        const text = formatTimestamp(base);
+        document.querySelectorAll('.watermark').forEach(el => {
+          if (el.textContent !== text) el.textContent = text;
+        });
+      }
+    }
+    window._progressRAF = requestAnimationFrame(tick);
+  }
+  window._progressRAF = requestAnimationFrame(tick);
+}
+function stopProgressRAF() {
+  if (window._progressRAF) {
+    cancelAnimationFrame(window._progressRAF);
+    window._progressRAF = null;
+  }
+}
+
+/* 时间水印：每秒更新到所有视频画面上，显示当前段对应的录制时间 */
+function startWatermarkUpdater() {
+  if (window._watermarkInterval) clearInterval(window._watermarkInterval);
+  function updateAll() {
+    const seg = state.filteredSegments[state.currentSegmentIdx];
+    const baseTime = seg ? new Date(seg.timestamp.getTime()) : new Date();
+    const v = state.videos[0];
+    let offset = 0;
+    if (v && isFinite(v.currentTime)) offset = v.currentTime;
+    baseTime.setSeconds(baseTime.getSeconds() + offset);
+    const text = formatTimestamp(baseTime);
+    document.querySelectorAll('.watermark').forEach(el => { el.textContent = text; });
+  }
+  updateAll();
+  window._watermarkInterval = setInterval(updateAll, 1000);
+}
+
+/* ============================================================
+   控件绑定
+   ============================================================ */
+function setupControls() {
+  $('pickFolderBtn').addEventListener('click', startLoading);
+
+  $('browseMode').addEventListener('change', () => {
+    applyBrowseFilter();
+    if (state.filteredSegments.length > 0) {
+      playSegmentAt(0, false);
+    } else {
+      // 清空播放器
+      const stage = $('playerStage');
+      stage.querySelectorAll('.video-cell').forEach(c => c.remove());
+      state.videos = [];
+      $('emptyState').style.display = '';
+      $('videoGrid').style.display = 'none';
+    }
+  });
+
+  $('layoutMode').addEventListener('change', (e) => {
+    // 用 video 元素的真实 paused 状态而不是 state.isPlaying 标志决定续播
+    const wasPlaying = state.videos[0] ? !state.videos[0].paused : false;
+    state.layoutMode = e.target.value;
+    if (state.currentSegmentIdx >= 0) {
+      playSegmentAt(state.currentSegmentIdx, wasPlaying);
+    }
+  });
+
+  $('playBtn').addEventListener('click', togglePlay);
+
+  $('prevSegBtn').addEventListener('click', () => {
+    if (state.currentSegmentIdx > 0) {
+      playSegmentAt(state.currentSegmentIdx - 1, true);
+    } else {
+      showToast('已经是第一段了');
+    }
+  });
+
+  $('nextSegBtn').addEventListener('click', () => {
+    if (state.currentSegmentIdx < state.filteredSegments.length - 1) {
+      playSegmentAt(state.currentSegmentIdx + 1, true);
+    } else {
+      showToast('已经是最后一段了');
+    }
+  });
+
+  // 进度条点击 + 拖动跳转
+  const progressBar = $('progressBar');
+  let progressDragging = false;
+  function seekToEvent(e) {
+    if (!state.videos.length || !state.duration || !isFinite(state.duration)) return;
+    const rect = progressBar.getBoundingClientRect();
+    const p = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const target = p * state.duration;
+    state.videos.forEach(v => { v.currentTime = target; });
+    updateProgressUI(target);
+  }
+  progressBar.addEventListener('pointerdown', (e) => {
+    if (!state.videos.length || !state.duration) return;
+    progressDragging = true;
+    progressBar.classList.add('dragging');
+    try { progressBar.setPointerCapture(e.pointerId); } catch (_) {}
+    seekToEvent(e);
+    e.preventDefault();
+  });
+  progressBar.addEventListener('pointermove', (e) => {
+    if (!progressDragging) return;
+    seekToEvent(e);
+  });
+  progressBar.addEventListener('pointerup', (e) => {
+    progressDragging = false;
+    progressBar.classList.remove('dragging');
+    try { progressBar.releasePointerCapture(e.pointerId); } catch (_) {}
+  });
+  progressBar.addEventListener('pointercancel', () => {
+    progressDragging = false;
+    progressBar.classList.remove('dragging');
+  });
+
+  // 速度
+  const SPEEDS = [0.25, 0.5, 1, 1.5, 2];
+  $('speedBtn').addEventListener('click', () => {
+    const cur = SPEEDS.indexOf(state.speed);
+    const next = SPEEDS[(cur + 1) % SPEEDS.length];
+    state.speed = next;
+    state.videos.forEach(v => v.playbackRate = next);
+    $('speedBtn').textContent = `速度 ${next}×`;
+  });
+
+  // 静音
+  $('muteBtn').addEventListener('click', () => {
+    state.muted = !state.muted;
+    state.videos.forEach(v => v.muted = state.muted);
+    $('muteBtn').textContent = state.muted ? '🔇' : '🔊';
+  });
+
+  // 全屏
+  $('fsBtn').addEventListener('click', () => {
+    const stage = $('playerStage');
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      stage.requestFullscreen?.() ||
+      stage.webkitRequestFullscreen?.() ||
+      stage.msRequestFullscreen?.();
+    }
+  });
+
+  // 快捷键
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    // Esc 关闭剪辑面板
+    if (e.key === 'Escape' && $('clipModal').classList.contains('show')) {
+      closeClipPanel();
+      return;
+    }
+    switch (e.key) {
+      case ' ':
+        e.preventDefault();
+        togglePlay();
+        break;
+      case 'ArrowLeft':
+        e.preventDefault();
+        $('prevSegBtn').click();
+        break;
+      case 'ArrowRight':
+        e.preventDefault();
+        $('nextSegBtn').click();
+        break;
+      case 'ArrowUp': {
+        e.preventDefault();
+        const next = Math.max(0, state.currentSegmentIdx - 1);
+        playSegmentAt(next, true);
+        break;
+      }
+      case 'ArrowDown': {
+        e.preventDefault();
+        const next = Math.min(state.filteredSegments.length - 1, state.currentSegmentIdx + 1);
+        if (next >= 0) playSegmentAt(next, true);
+        break;
+      }
+      case 'l':
+      case 'L': {
+        e.preventDefault();
+        const opts = Array.from($('layoutMode').options);
+        const cur = $('layoutMode').selectedIndex;
+        const ni = (cur + 1) % opts.length;
+        $('layoutMode').selectedIndex = ni;
+        $('layoutMode').dispatchEvent(new Event('change'));
+        break;
+      }
+      case 's':
+      case 'S':
+        e.preventDefault();
+        $('speedBtn').click();
+        break;
+      case 'm':
+      case 'M':
+        e.preventDefault();
+        $('muteBtn').click();
+        break;
+      case 'f':
+      case 'F':
+        e.preventDefault();
+        $('fsBtn').click();
+        break;
+      case 'i':
+      case 'I':
+        e.preventDefault();
+        markIn();
+        break;
+      case 'o':
+      case 'O':
+        e.preventDefault();
+        markOut();
+        break;
+      case 'p':
+      case 'P':
+        e.preventDefault();
+        previewSelection();
+        break;
+      case 'c':
+      case 'C':
+        e.preventDefault();
+        toggleClipPanel();
+        break;
+    }
+  });
+
+  // 快捷键提示
+  $('shortcutBtn').addEventListener('click', () => {
+    showToast('Space 播放 · ←→ 切段 · ↑↓ 事件 · L 布局 · S 速度 · F 全屏 · M 静音 · I/O 入出点 · P 预览选区 · C 剪辑导出', 'success');
+  });
+}
+
+/* ============================================================
+   启动
+   ============================================================ */
+/* ============================================================
+   剪辑与导出
+   ------------------------------------------------------------
+   纯前端实现：把选区时间段对应的 <video> 画面绘制到 <canvas>，
+   用 canvas.captureStream() + MediaRecorder 录制成视频文件并触发下载。
+   不依赖任何第三方库，不上传任何数据，全程在本机浏览器内完成。
+   ============================================================ */
+
+/* 秒 → m:ss.s */
+function fmtSecS(t) {
+  if (!isFinite(t) || t < 0) t = 0;
+  const m = Math.floor(t / 60);
+  const s = t - m * 60;
+  return `${m}:${s.toFixed(1).padStart(4, '0')}`;
+}
+
+function currentSegOf() {
+  return state.filteredSegments[state.currentSegmentIdx] || null;
+}
+
+function sourceLabel(src) {
+  return src === 'saved' ? '手动保存事件' : src === 'sentry' ? '哨兵事件' : '最近录制';
+}
+
+/* ============================================================
+   1) 裁剪选区：标记 / 拖动 / 预览
+   ============================================================ */
+function updateSelectionOverlay() {
+  const layer = $('selectionLayer');
+  if (!layer) return;
+  const dur = state.duration;
+  if (!state.sel.active || !dur || !isFinite(dur) || dur <= 0) {
+    layer.classList.remove('active');
+    return;
+  }
+  layer.classList.add('active');
+  const p1 = Math.max(0, Math.min(100, (state.sel.start / dur) * 100));
+  const p2 = Math.max(0, Math.min(100, (state.sel.end / dur) * 100));
+  $('selRange').style.left = p1 + '%';
+  $('selRange').style.width = Math.max(0, p2 - p1) + '%';
+  $('selStartHandle').style.left = p1 + '%';
+  $('selEndHandle').style.left = p2 + '%';
+}
+
+/* 保证 start <= end 且落在 [0, duration] */
+function normSelection() {
+  const dur = state.duration || 0;
+  let a = Math.max(0, Math.min(dur, state.sel.start));
+  let b = Math.max(0, Math.min(dur, state.sel.end));
+  if (b < a) { const t = a; a = b; b = t; }
+  state.sel.start = a;
+  state.sel.end = b;
+}
+
+function ensureSelectionExists() {
+  if (state.sel.active) return;
+  state.sel.start = 0;
+  state.sel.end = state.duration || 0;
+  state.sel.active = true;
+  const seg = currentSegOf();
+  state.sel.segId = seg ? seg.id : null;
+}
+
+function markIn() {
+  const v = state.videos[0];
+  if (!v || !state.duration) { showToast('请先加载并播放一段视频', 'error'); return; }
+  const t = v.currentTime;
+  if (!state.sel.active || state.sel.end <= t) state.sel.end = state.duration;
+  state.sel.start = t;
+  state.sel.active = true;
+  const seg = currentSegOf();
+  state.sel.segId = seg ? seg.id : null;
+  normSelection();
+  updateSelectionOverlay();
+  refreshClipPanel();
+  showToast('裁剪起点已设为 ' + fmtSecS(state.sel.start), 'success');
+}
+
+function markOut() {
+  const v = state.videos[0];
+  if (!v || !state.duration) { showToast('请先加载并播放一段视频', 'error'); return; }
+  const t = v.currentTime;
+  if (!state.sel.active) state.sel.start = 0;
+  state.sel.end = t;
+  state.sel.active = true;
+  const seg = currentSegOf();
+  state.sel.segId = seg ? seg.id : null;
+  normSelection();
+  updateSelectionOverlay();
+  refreshClipPanel();
+  showToast('裁剪终点已设为 ' + fmtSecS(state.sel.end), 'success');
+}
+
+function clearSelection() {
+  state.sel = { active: false, start: 0, end: 0, segId: null };
+  state._previewStopAt = null;
+  updateSelectionOverlay();
+  refreshClipPanel();
+}
+
+function previewSelection() {
+  if (!state.sel.active) { showToast('请先设置裁剪区间（按 I / O 或点「入点 / 出点」）', 'error'); return; }
+  const v = state.videos[0];
+  if (!v) { showToast('请先加载视频', 'error'); return; }
+  normSelection();
+  state.videos.forEach(o => { try { o.currentTime = state.sel.start; } catch (_) {} });
+  state._previewStopAt = state.sel.end;
+  v.play().catch(() => {});
+  showToast('预览选区 ' + fmtSecS(state.sel.start) + ' → ' + fmtSecS(state.sel.end), 'success');
+}
+
+/* ============================================================
+   2) 剪辑列表面板
+   ============================================================ */
+function openClipPanel() {
+  $('clipModal').classList.add('show');
+  refreshClipPanel();
+}
+function closeClipPanel() {
+  $('clipModal').classList.remove('show');
+}
+function toggleClipPanel() {
+  if ($('clipModal').classList.contains('show')) closeClipPanel();
+  else openClipPanel();
+}
+
+/* 只同步输入框与按钮状态（手柄拖动时高频调用，不重建列表） */
+function syncSelInputs() {
+  if (state.sel.active) {
+    $('selStartInput').value = state.sel.start.toFixed(1);
+    $('selEndInput').value = state.sel.end.toFixed(1);
+    $('selDurText').textContent = Math.max(0, state.sel.end - state.sel.start).toFixed(1) + ' 秒';
+  } else {
+    $('selDurText').textContent = '0.0 秒（未设定）';
+  }
+  $('addClipBtn').disabled = !state.sel.active || !currentSegOf();
+}
+
+function refreshClipPanel() {
+  // --- 当前选区 / 当前段信息 ---
+  const seg = currentSegOf();
+  if (seg) {
+    const d = seg.timestamp;
+    const head = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ` +
+                 `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    $('selSegText').textContent = head + ' · ' + sourceLabel(seg.source) +
+      (state.duration ? ' · 时长 ' + fmtSecS(state.duration) : '');
+  } else {
+    $('selSegText').textContent = '尚未加载视频';
+  }
+  syncSelInputs();
+
+  // --- 剪辑列表 ---
+  const list = $('clipList');
+  const clips = state.exportClips;
+  $('clipCount').textContent = clips.length;
+  $('clipTotal').textContent = fmtSecS(clips.reduce((a, c) => a + c.duration, 0));
+  list.innerHTML = '';
+  if (!clips.length) {
+    const d = document.createElement('div');
+    d.className = 'clip-empty';
+    d.textContent = '剪辑列表为空。播放视频 → 按 I / O（或点「⇤ 入点 / 出点 ⇥」）标记区间 → 点下方按钮加入列表。';
+    list.appendChild(d);
+  } else {
+    clips.forEach((c, i) => {
+      const row = document.createElement('div');
+      row.className = 'clip-row';
+      const d = c.timestamp;
+      const timeStr = `${pad(d.getMonth()+1)}-${pad(d.getDate())} ` +
+                      `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+      row.innerHTML =
+        '<span class="clip-idx">' + (i + 1) + '</span>' +
+        '<span class="clip-time">' + timeStr + '</span>' +
+        '<span class="clip-range">' + fmtSecS(c.start) + ' → ' + fmtSecS(c.end) + '</span>' +
+        '<span class="clip-dur">' + c.duration.toFixed(1) + 's</span>' +
+        '<button class="clip-del" data-i="' + i + '" title="移除这一项">✕</button>';
+      list.appendChild(row);
+    });
+    list.querySelectorAll('.clip-del').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.exportClips.splice(parseInt(btn.dataset.i, 10), 1);
+        refreshClipPanel();
+      });
+    });
+  }
+
+  $('exportStartBtn').disabled = state.exporting || clips.length === 0;
+  $('exportCancelBtn').disabled = !state.exporting;
+  $('clipModalClose').disabled = state.exporting;
+  updateExportSizeHint();
+}
+
+function addSelectionToQueue() {
+  const seg = currentSegOf();
+  if (!seg) { showToast('请先选择一段视频', 'error'); return; }
+  if (!state.sel.active) { showToast('请先用「入点 / 出点」设定裁剪区间', 'error'); return; }
+  if (state.sel.segId && state.sel.segId !== seg.id) {
+    showToast('当前选区属于其它视频段，请重新标记入点 / 出点', 'error');
+    return;
+  }
+  normSelection();
+  const dur = state.sel.end - state.sel.start;
+  if (dur < 0.2) { showToast('选区太短（至少 0.2 秒）', 'error'); return; }
+  if (state.exportClips.length >= 50) { showToast('剪辑列表最多 50 项', 'error'); return; }
+
+  state.exportClips.push({
+    segId: seg.id,
+    start: state.sel.start,
+    end: state.sel.end,
+    duration: dur,
+    timestamp: new Date(seg.timestamp.getTime()),
+    source: seg.source,
+  });
+  refreshClipPanel();
+  showToast('已加入剪辑列表（' + dur.toFixed(1) + ' 秒）', 'success');
+}
+
+/* ============================================================
+   3) 导出：canvas 合成 + MediaRecorder 实时录制
+   ============================================================ */
+function evenNum(x) { return Math.max(2, Math.round(x / 2) * 2); }
+
+function camsForLayout(layout) {
+  switch (layout) {
+    case 'layout-1':   return ['front'];
+    case 'layout-4':   return ['front', 'back', 'left_repeater', 'right_repeater'];
+    case 'layout-pip': return ['front', 'back'];
+    case 'layout-2v':  return ['front', 'back'];
+    default:           return ['front', 'back'];   // layout-2h
+  }
+}
+
+function geomForLayout(layout) {
+  switch (layout) {
+    case 'layout-1':   return { cols: 1, rows: 1, pip: false };
+    case 'layout-4':   return { cols: 2, rows: 2, pip: false };
+    case 'layout-2v':  return { cols: 1, rows: 2, pip: false };
+    case 'layout-pip': return { cols: 1, rows: 1, pip: true };
+    default:           return { cols: 2, rows: 1, pip: false };  // layout-2h
+  }
+}
+
+/* 该段实际可用的摄像头（按布局优先级），并保证至少有一路 */
+function resolveCams(seg, layout) {
+  const got = camsForLayout(layout).filter(c => seg.clips[c]);
+  if (got.length) return got;
+  for (const c of CAMERA_FULL_LIST) if (seg.clips[c]) return [c];
+  return [];
+}
+
+function pickMimeType(pref) {
+  if (!window.MediaRecorder) return '';
+  const mp4  = ['video/mp4;codecs=avc1.42E01E', 'video/mp4;codecs=avc1', 'video/mp4'];
+  const webm = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  const list = (pref === 'webm') ? webm.concat(mp4)
+             : (pref === 'mp4')  ? mp4.concat(webm)
+             : mp4.concat(webm);
+  for (const c of list) {
+    try { if (MediaRecorder.isTypeSupported(c)) return c; } catch (_) {}
+  }
+  return '';
+}
+
+function waitEvent(el, name, timeout) {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    function finish(err) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      el.removeEventListener(name, ok);
+      el.removeEventListener('error', bad);
+      if (err) reject(err); else resolve();
+    }
+    function ok() { finish(null); }
+    function bad() { finish(new Error('视频解码失败')); }
+    const timer = setTimeout(() => finish(new Error('视频加载超时')), timeout || 15000);
+    el.addEventListener(name, ok, { once: true });
+    el.addEventListener('error', bad, { once: true });
+  });
+}
+
+/* 为一个剪辑条目准备好各路的离线 <video> 元素 */
+async function prepareClip(clip, layout, speedFactor) {
+  const seg = state.segments.find(s => s.id === clip.segId);
+  if (!seg) throw new Error('找不到对应的视频段');
+  const cams = resolveCams(seg, layout);
+  if (!cams.length) throw new Error('该段没有任何可用的摄像头视频');
+
+  const videos = cams.map(cam => {
+    const v = document.createElement('video');
+    v.muted = true;
+    v.defaultMuted = true;
+    v.playsInline = true;
+    v.preload = 'auto';
+    v.playbackRate = speedFactor;
+    const url = URL.createObjectURL(seg.clips[cam]);
+    v.__objUrl = url;
+    v.src = url;
+    return v;
+  });
+
+  await Promise.all(videos.map(v => waitEvent(v, 'loadedmetadata')));
+  const v0 = videos[0];
+  const ar = (v0.videoWidth || 1280) / (v0.videoHeight || 960);
+  const srcH = v0.videoHeight || 960;
+  return { clip, seg, cams, videos, ar, srcH };
+}
+
+function cleanupClip(prep) {
+  if (!prep || !prep.videos) return;
+  prep.videos.forEach(v => {
+    try { v.pause(); } catch (_) {}
+    try { if (v.__objUrl) URL.revokeObjectURL(v.__objUrl); } catch (_) {}
+    try { v.removeAttribute('src'); v.load(); } catch (_) {}
+  });
+  prep.videos = [];
+}
+
+function seekAll(videos, t) {
+  return Promise.all(videos.map(v => new Promise(res => {
+    let settled = false;
+    function done() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      v.removeEventListener('seeked', done);
+      res();
+    }
+    const timer = setTimeout(done, 4000);
+    if (v.readyState >= 2 && Math.abs(v.currentTime - t) < 0.05) { done(); return; }
+    v.addEventListener('seeked', done);
+    try { v.currentTime = t; } catch (_) { done(); }
+  })));
+}
+
+/* 等比缩放并居中绘制（不拉伸变形） */
+function drawContain(ctx, v, x, y, w, h) {
+  if (!v || !v.videoWidth || !v.videoHeight) return;
+  const ar = v.videoWidth / v.videoHeight;
+  let dw = w, dh = w / ar;
+  if (dh > h) { dh = h; dw = h * ar; }
+  try { ctx.drawImage(v, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh); } catch (_) {}
+}
+
+function drawWatermarkText(ctx, W, H, date) {
+  const text = date.getFullYear() + '-' + pad(date.getMonth()+1) + '-' + pad(date.getDate()) + ' ' +
+               pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds());
+  const fs = Math.max(14, Math.round(H * 0.028));
+  ctx.font = '500 ' + fs + 'px ui-monospace, "SF Mono", Menlo, Consolas, "Microsoft YaHei", monospace';
+  ctx.textBaseline = 'top';
+  const padX = Math.round(fs * 0.8), padY = Math.round(fs * 0.42), margin = 20;
+  const tw = ctx.measureText(text).width;
+  const bw = tw + padX * 2, bh = fs + padY * 2;
+  const bx = W - bw - margin, by = margin;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = 'rgba(0,0,0,0.85)';
+  ctx.shadowBlur = Math.max(2, Math.round(fs * 0.22));
+  ctx.fillText(text, bx + padX, by + padY);
+  ctx.shadowBlur = 0;
+  ctx.shadowColor = 'transparent';
+}
+
+/* 把多路画面按布局合成到 canvas；date 为 null 时不烧录水印 */
+function drawComposite(ctx, W, H, geom, videos, date) {
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, W, H);
+
+  if (geom.pip) {
+    drawContain(ctx, videos[0], 0, 0, W, H);
+    const v1 = videos[1];
+    if (v1 && v1.videoWidth) {
+      const ar1 = v1.videoWidth / v1.videoHeight;
+      const pw = Math.round(W * 0.30);
+      const ph = Math.round(pw / ar1);
+      const px = W - pw - 20, py = H - ph - 20;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(px - 2, py - 2, pw + 4, ph + 4);
+      drawContain(ctx, v1, px, py, pw, ph);
+    }
+  } else {
+    const cw = W / geom.cols, ch = H / geom.rows;
+    videos.forEach((v, i) => {
+      if (!v) return;
+      const cx = (i % geom.cols) * cw;
+      const cy = Math.floor(i / geom.cols) * ch;
+      drawContain(ctx, v, cx, cy, cw, ch);
+    });
+  }
+
+  if (date) drawWatermarkText(ctx, W, H, date);
+}
+
+/* 录制单个剪辑条目：从入点播到出点，逐帧绘制到 canvas */
+async function recordClip(prep, ctx, W, H, geom, burnWatermark, fps, onProgress) {
+  const clip = prep.clip, seg = prep.seg, videos = prep.videos;
+  const main = videos[0];
+
+  await seekAll(videos, clip.start);
+  await Promise.all(videos.map(v => v.play().catch(() => {})));
+
+  const baseTs = seg.timestamp.getTime() + clip.start * 1000;
+  const frameInterval = Math.max(1, 1000 / fps);
+  const hardDeadline = performance.now() +
+    (clip.duration / Math.max(0.25, main.playbackRate)) * 1000 + 20000;
+
+  await new Promise(resolve => {
+    let lastDraw = 0;
+    let finished = false;
+    function finish() {
+      if (finished) return;
+      finished = true;
+      videos.forEach(v => { try { v.pause(); } catch (_) {} });
+      // 收尾补一帧，确保最后画面完整
+      drawComposite(ctx, W, H, geom, videos,
+        burnWatermark ? new Date(baseTs + clip.duration * 1000) : null);
+      resolve();
+    }
+    function loop(ts) {
+      if (finished) return;
+      if (state.exportCancel || performance.now() > hardDeadline) { finish(); return; }
+      const t = main.currentTime;
+      if (t >= clip.end - 0.004 || main.ended) { finish(); return; }
+      // 多路轻微漂移校正
+      videos.forEach(v => {
+        if (v !== main && Math.abs(v.currentTime - t) > 0.35) {
+          try { v.currentTime = t; } catch (_) {}
+        }
+      });
+      if (ts - lastDraw >= frameInterval - 1) {
+        lastDraw = ts;
+        drawComposite(ctx, W, H, geom, videos, burnWatermark ? new Date(baseTs + t * 1000) : null);
+        if (onProgress) onProgress(Math.min(clip.duration, Math.max(0, t - clip.start)));
+      }
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+  });
+}
+
+/* 根据当前导出设置预估输出分辨率，实时显示在面板上 */
+function updateExportSizeHint() {
+  const el = $('exportSizeHint');
+  if (!el) return;
+  const layoutSel = $('exportLayout').value;
+  const layout = layoutSel === 'current' ? state.layoutMode : layoutSel;
+  const geom = geomForLayout(layout);
+  const quality = $('exportQuality').value;
+  const v = state.videos[0];
+  if (!v || !v.videoHeight) {
+    el.textContent = '预计输出分辨率：加载视频后显示';
+    return;
+  }
+  const ar = v.videoWidth / v.videoHeight;
+  const srcH = v.videoHeight;
+  const H0 = (quality === 'src' ? 0 : parseInt(quality, 10)) || srcH * geom.rows;
+  const W = evenNum((H0 / geom.rows) * ar * geom.cols);
+  const H = evenNum(H0);
+  const cells = geom.cols * geom.rows;
+  const cams = geom.pip ? '主画面 + 画中画' : cells + ' 宫格';
+  el.textContent = '预计输出分辨率：' + W + ' × ' + H + '（' + cams + '，源画面 ' + v.videoWidth + '×' + v.videoHeight + '）';
+}
+
+function buildExportName(ext) {
+  const clips = state.exportClips;
+  const d = clips[0].timestamp;
+  const stamp = d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) + '_' +
+                pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+  const total = clips.reduce((a, c) => a + c.duration, 0);
+  return clips.length === 1
+    ? 'TeslaCam_' + stamp + '_' + clips[0].start.toFixed(1) + 's-' + clips[0].end.toFixed(1) + 's.' + ext
+    : 'TeslaCam_' + stamp + '_' + clips.length + 'clips_' + total.toFixed(0) + 's.' + ext;
+}
+
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 8000);
+}
+
+function setExportUI(on) {
+  $('exportProgressWrap').style.display = on ? '' : 'none';
+  $('exportStartBtn').disabled = on || state.exportClips.length === 0;
+  $('exportCancelBtn').disabled = !on;
+  $('clipModalClose').disabled = on;
+  if (!on) $('exportProgressBar').style.width = '0%';
+}
+
+function setExportProgress(ratio, eta) {
+  const r = Math.max(0, Math.min(1, ratio));
+  $('exportProgressBar').style.width = (r * 100).toFixed(1) + '%';
+  const total = state.exportClips.reduce((a, c) => a + c.duration, 0);
+  $('exportProgressText').textContent =
+    (r * 100).toFixed(1) + '% · 已录制 ' + fmtSecS(total * r) + ' / ' + fmtSecS(total) +
+    (eta > 0.5 ? ' · 预计剩余 ' + Math.ceil(eta) + ' 秒' : '');
+}
+
+async function startExport() {
+  if (state.exporting) return;
+  const clips = state.exportClips;
+  if (!clips.length) { showToast('剪辑列表为空', 'error'); return; }
+  if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) {
+    showToast('当前浏览器不支持 canvas 录制导出，请使用 Chrome / Edge 最新版', 'error');
+    return;
+  }
+
+  const layoutSel = $('exportLayout').value;
+  const layout = layoutSel === 'current' ? state.layoutMode : layoutSel;
+  const quality = $('exportQuality').value;
+  const fps = parseInt($('exportFps').value, 10) || 30;
+  const pref = $('exportFormat').value;
+  const burnWatermark = $('exportWatermark').checked;
+  const speedFactor = parseFloat($('exportSpeed').value) || 1;
+
+  const mime = pickMimeType(pref);
+  if (!mime) { showToast('当前浏览器没有可用的视频编码器', 'error'); return; }
+
+  state.exporting = true;
+  state.exportCancel = false;
+  refreshClipPanel();
+  setExportUI(true);
+  setExportProgress(0, 0);
+
+  // 导出期间暂停主播放器，避免解码资源竞争
+  const wasPlaying = state.videos[0] ? !state.videos[0].paused : false;
+  state.videos.forEach(v => { try { v.pause(); } catch (_) {} });
+
+  let rec = null, stream = null, prepared = null;
+  try {
+    prepared = await prepareClip(clips[0], layout, speedFactor);
+    const geom = geomForLayout(layout);
+    const targetH = quality === 'src' ? 0 : parseInt(quality, 10);
+    const H0 = targetH || prepared.srcH * geom.rows;
+    const W = evenNum((H0 / geom.rows) * prepared.ar * geom.cols);
+    const H = evenNum(H0);
+
+    if (W * H > 3840 * 2160) {
+      showToast('输出 ' + W + '×' + H + ' 分辨率较高，编码可能掉帧，建议降低「输出画质」', 'error');
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, W, H);
+
+    stream = canvas.captureStream(fps);
+    const bitrate = Math.max(1200000, Math.round(W * H * fps * 0.08));
+    rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bitrate });
+    const chunks = [];
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    const stopped = new Promise(res => { rec.onstop = res; });
+    rec.start(1000);
+
+    const totalDur = clips.reduce((a, c) => a + c.duration, 0);
+    const wallTotal = totalDur / speedFactor;
+    const t0 = performance.now();
+    let doneBefore = 0;
+
+    for (let i = 0; i < clips.length; i++) {
+      const cur = prepared;
+      // 并行预取下一段，缩短段间空档
+      const nextP = (i + 1 < clips.length) ? prepareClip(clips[i + 1], layout, speedFactor) : null;
+
+      await recordClip(cur, ctx, W, H, geom, burnWatermark, fps, clipCur => {
+        const ratio = totalDur > 0 ? (doneBefore + clipCur) / totalDur : 0;
+        const elapsed = (performance.now() - t0) / 1000;
+        setExportProgress(ratio, Math.max(0, wallTotal - elapsed));
+      });
+
+      doneBefore += cur.clip.duration;
+      cleanupClip(cur);
+      if (state.exportCancel) {
+        if (nextP) nextP.then(cleanupClip).catch(() => {});
+        break;
+      }
+      prepared = nextP ? await nextP : null;
+    }
+    setExportProgress(1, 0);   // 收尾对齐到 100%
+
+    rec.stop();
+    await stopped;
+
+    if (!chunks.length) {
+      showToast('没有录制到任何数据，导出失败', 'error');
+    } else {
+      const ext = /mp4/i.test(mime) ? 'mp4' : 'webm';
+      const blob = new Blob(chunks, { type: mime.split(';')[0] });
+      const name = buildExportName(ext);
+      downloadBlob(blob, name);
+      const note = state.exportCancel ? '（已按请求提前停止）' : '';
+      showToast('导出完成' + note + '：' + name + ' · ' + (blob.size / 1048576).toFixed(1) + ' MB', 'success');
+    }
+  } catch (err) {
+    console.error('[导出失败]', err);
+    showToast('导出失败：' + (err && err.message ? err.message : err), 'error');
+    try { if (rec && rec.state !== 'inactive') rec.stop(); } catch (_) {}
+  } finally {
+    try { if (stream) stream.getTracks().forEach(t => t.stop()); } catch (_) {}
+    if (prepared) { try { cleanupClip(prepared); } catch (_) {} }
+    state.exporting = false;
+    state.exportCancel = false;
+    setExportUI(false);
+    refreshClipPanel();
+    // 恢复导出前的播放状态
+    if (wasPlaying && state.videos[0]) state.videos[0].play().catch(() => {});
+  }
+}
+
+/* ============================================================
+   4) 剪辑面板事件绑定
+   ============================================================ */
+function applySelInput(which) {
+  const el = which === 'start' ? $('selStartInput') : $('selEndInput');
+  const v = parseFloat(el.value);
+  if (!isFinite(v)) { refreshClipPanel(); return; }
+  ensureSelectionExists();
+  if (which === 'start') state.sel.start = v; else state.sel.end = v;
+  normSelection();
+  updateSelectionOverlay();
+  refreshClipPanel();
+}
+
+function setupClipUI() {
+  $('clipBtn').addEventListener('click', toggleClipPanel);
+  $('clipModalClose').addEventListener('click', closeClipPanel);
+
+  // 主界面 / 面板内的入点·出点
+  $('markInBtn').addEventListener('click', markIn);
+  $('markOutBtn').addEventListener('click', markOut);
+  $('useCurrentInBtn').addEventListener('click', markIn);
+  $('useCurrentOutBtn').addEventListener('click', markOut);
+  // 预览时关掉面板，方便看画面
+  $('previewSelBtn').addEventListener('click', () => { closeClipPanel(); previewSelection(); });
+  $('clearSelBtn').addEventListener('click', clearSelection);
+  $('addClipBtn').addEventListener('click', addSelectionToQueue);
+  $('clearClipsBtn').addEventListener('click', () => {
+    if (!state.exportClips.length) return;
+    state.exportClips = [];
+    refreshClipPanel();
+  });
+
+  // 起止时间数值输入（用 change 而不是 input，避免边输入边被回写打断）
+  $('selStartInput').addEventListener('change', () => applySelInput('start'));
+  $('selEndInput').addEventListener('change', () => applySelInput('end'));
+
+  // ±0.1s / ±1s 微调
+  document.querySelectorAll('button.mini[data-adj]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const parts = btn.dataset.adj.split(':');
+      const which = parts[0];
+      const delta = parseFloat(parts[1]) || 0;
+      ensureSelectionExists();
+      if (which === 'start') state.sel.start += delta;
+      else state.sel.end += delta;
+      normSelection();
+      updateSelectionOverlay();
+      refreshClipPanel();
+    });
+  });
+
+  // 进度条上的选区手柄拖动
+  [['selStartHandle', 'start'], ['selEndHandle', 'end']].forEach(pair => {
+    const el = $(pair[0]);
+    const which = pair[1];
+    let dragging = false;
+    function posToTime(e) {
+      const rect = $('progressBar').getBoundingClientRect();
+      const p = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      return p * (state.duration || 0);
+    }
+    el.addEventListener('pointerdown', e => {
+      if (!state.sel.active) return;
+      dragging = true;
+      try { el.setPointerCapture(e.pointerId); } catch (_) {}
+      e.stopPropagation();
+      e.preventDefault();
+    });
+    el.addEventListener('pointermove', e => {
+      if (!dragging) return;
+      const t = posToTime(e);
+      if (which === 'start') state.sel.start = Math.min(t, state.sel.end);
+      else state.sel.end = Math.max(t, state.sel.start);
+      updateSelectionOverlay();
+      syncSelInputs();
+      e.stopPropagation();
+    });
+    el.addEventListener('pointerup', e => {
+      dragging = false;
+      try { el.releasePointerCapture(e.pointerId); } catch (_) {}
+      e.stopPropagation();
+    });
+  });
+
+  // 导出
+  $('exportStartBtn').addEventListener('click', startExport);
+  $('exportLayout').addEventListener('change', updateExportSizeHint);
+  $('exportQuality').addEventListener('change', updateExportSizeHint);
+  $('exportCancelBtn').addEventListener('click', () => {
+    state.exportCancel = true;
+    showToast('将在当前片段结束后停止并保存已录制内容', 'success');
+  });
+
+  refreshClipPanel();
+}
+
+setupControls();
+setupClipUI();
+console.log('Tesla 行车记录仪查看器已就绪。请点击右上角"选择 TeslaCam 文件夹"开始使用。');
+</script>
+</body>
+</html>

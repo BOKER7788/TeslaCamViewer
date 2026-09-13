@@ -1,0 +1,49 @@
+# ============================================================
+#  Tesla 行车记录仪查看器 — Git 忽略规则
+# ============================================================
+
+# ---------- 工具本地状态（不含源码，无需入库） ----------
+.workbuddy/
+
+# ---------- 编辑器 / IDE ----------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---------- 操作系统生成的文件 ----------
+Thumbs.db
+ehthumbs.db
+desktop.ini
+.DS_Store
+._*
+
+# ---------- 开发过程中的临时验证产物 ----------
+# （形如 _verify.js / _test_result.txt / _shot_log.txt 等）
+_*.js
+_*.html
+_*.txt
+_*.png
+_*.log
+
+# ---------- TeslaCam 视频素材 ----------
+# 行车记录视频体积极大，且属于个人隐私数据，绝不入库
+TeslaCam/
+RecentClips/
+SavedClips/
+SentryClips/
+*.mp4
+*.mkv
+*.avi
+
+# ---------- 导出产物 ----------
+TeslaCam_*.webm
+TeslaCam_*.mp4
+
+# ---------- 依赖与构建输出（本项目为零依赖，仅作防御） ----------
+node_modules/
+dist/
+build/
+__pycache__/
+*.pyc
